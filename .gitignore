@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+uploads/*
+!uploads/.gitkeep
+data/*
+!data/.gitkeep
+shared_files/*
+.env
+*.log

@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>登录 - 财务审计工作台</title>
+<link href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}" rel="stylesheet">
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=9">
+</head>
+<body class="app-body auth-register-page" data-theme="default">
+<div class="auth-page">
+  <div class="auth-card auth-card-wide">
+    <div class="auth-brand">
+      <span class="brand-mark">审</span>
+      <h1>财务审计工作台</h1>
+      <p>登录或注册，选择职业模式与界面风格</p>
+    </div>
+
+    <ul class="nav auth-tabs mb-3" role="tablist">
+      <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabLogin">登录</button></li>
+      <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabRegister">注册</button></li>
+    </ul>
+
+    <div id="authError" class="alert alert-danger d-none"></div>
+    <div id="authSuccess" class="alert alert-success d-none"></div>
+
+    <div class="tab-content">
+      <div class="tab-pane fade show active" id="tabLogin">
+        <form id="loginForm">
+          <div class="mb-3">
+            <label class="form-label">用户名</label>
+            <input type="text" class="form-control" name="username" required autocomplete="username">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">密码</label>
+            <input type="password" class="form-control" name="password" required autocomplete="current-password">
+          </div>
+          <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" name="remember" id="rememberMe" checked>
+            <label class="form-check-label" for="rememberMe">记住登录（30 天）</label>
+          </div>
+          <button type="submit" class="btn btn-primary w-100" id="loginBtn">登录</button>
+        </form>
+      </div>
+
+      <div class="tab-pane fade" id="tabRegister">
+        <form id="registerForm">
+          <div class="row g-2">
+            <div class="col-md-6 mb-2">
+              <label class="form-label">用户名</label>
+              <input type="text" class="form-control" name="username" required minlength="2">
+            </div>
+            <div class="col-md-6 mb-2">
+              <label class="form-label">职业模式</label>
+              <select class="form-select" name="role" id="regRole">
+                {% for key, label in roles.items() %}
+                <option value="{{ key }}" {% if key == 'student' %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+              <div id="roleHint" class="form-text small text-muted mt-1"></div>
+            </div>
+            <div class="col-md-6 mb-2">
+              <label class="form-label">密码</label>
+              <input type="password" class="form-control" name="password" required minlength="4">
+            </div>
+            <div class="col-md-6 mb-2">
+              <label class="form-label">确认密码</label>
+              <input type="password" class="form-control" name="password2" required minlength="4">
+            </div>
+          </div>
+
+          <div id="customizePanel" class="register-customize mt-3">
+            <div class="small text-muted mb-2"><i class="bi bi-sliders"></i> 普通用户 / 学生可自定义界面与功能</div>
+            <div class="row g-2">
+              <div class="col-md-4">
+                <label class="form-label small">页面配色</label>
+                <select class="form-select form-select-sm" name="theme" id="regTheme">
+                  {% for key, label in themes.items() %}
+                  <option value="{{ key }}">{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">页面样式</label>
+                <select class="form-select form-select-sm" name="page_style" id="regPageStyle">
+                  {% for key, label in page_styles.items() %}
+                  <option value="{{ key }}">{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="col-md-4">
+                <label class="form-label small">强调色</label>
+                <input type="color" class="form-control form-control-color w-100" name="accent_color" id="regAccent" value="#ff6b00">
+              </div>
+            </div>
+            <div class="mt-3" id="regFeatures">
+              <label class="form-label small d-block mb-2">启用功能（含消息、视频通话、AI 助手等）</label>
+              <div class="register-feature-grid">
+                {% for key, label in features.items() %}
+                <label class="register-feature-item">
+                  <input class="form-check-input reg-feat" type="checkbox" value="{{ key }}" checked>
+                  <span>{{ label }}</span>
+                </label>
+                {% endfor %}
+              </div>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary w-100 mt-3" id="registerBtn">注册并登录</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+<script>
+const nextUrl = {{ next_url|tojson }};
+const customizableRoles = {{ customizable_roles|tojson }};
+const roleLabels = {{ roles|tojson }};
+
+const ROLE_HINTS = {
+  audit_manager: '审计经理：完整权限，岩灰商务主题',
+  finance_director: '财务主管：完整权限，海蓝主题',
+  accountant: '会计：侧重账务处理与报表',
+  auditor: '审计：完整审计工作流',
+  cashier: '出纳：侧重收付与对账',
+  tax_assistant: '税务助理：侧重税务分析与申报',
+  consultant: '顾问：宽松布局，深色主题',
+  normal_user: '普通用户：可自选功能、配色与样式',
+  student: '学生：可自选功能、配色与样式（默认推荐）',
+};
+
+function showError(msg) {
+  document.getElementById('authError').textContent = msg;
+  document.getElementById('authError').classList.remove('d-none');
+  document.getElementById('authSuccess').classList.add('d-none');
+}
+
+function submitAuth(url, body, btn) {
+  btn.disabled = true;
+  fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+    .then(r => r.json())
+    .then(data => {
+      if (data.success) window.location.href = data.redirect || nextUrl || '/';
+      else { showError(data.error || '操作失败'); btn.disabled = false; }
+    })
+    .catch(err => { showError('请求失败: ' + err.message); btn.disabled = false; });
+}
+
+function toggleCustomizePanel() {
+  const role = document.getElementById('regRole').value;
+  const panel = document.getElementById('customizePanel');
+  const hint = document.getElementById('roleHint');
+  panel.style.display = customizableRoles.includes(role) ? 'block' : 'none';
+  hint.textContent = ROLE_HINTS[role] || '';
+}
+
+document.getElementById('regRole').addEventListener('change', toggleCustomizePanel);
+toggleCustomizePanel();
+
+document.getElementById('loginForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  submitAuth('/api/auth/login', {
+    username: fd.get('username'), password: fd.get('password'), remember: fd.get('remember') === 'on',
+  }, document.getElementById('loginBtn'));
+});
+
+document.getElementById('registerForm').addEventListener('submit', e => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  if (fd.get('password') !== fd.get('password2')) { showError('两次密码不一致'); return; }
+  const features = {};
+  document.querySelectorAll('.reg-feat').forEach(cb => { features[cb.value] = cb.checked; });
+  submitAuth('/api/auth/register', {
+    username: fd.get('username'),
+    password: fd.get('password'),
+    remember: true,
+    role: fd.get('role'),
+    theme: fd.get('theme'),
+    page_style: fd.get('page_style'),
+    accent_color: fd.get('accent_color'),
+    features,
+  }, document.getElementById('registerBtn'));
+});
+</script>
+</body>
+</html>
