@@ -5,15 +5,14 @@
 <style>
 .dev-studio { display:grid; grid-template-columns:240px 1fr 320px; gap:14px; min-height:calc(100vh - 200px); }
 @media (max-width:1100px) { .dev-studio { grid-template-columns:1fr; } .dev-test-panel { display:none; } }
-.dev-panel { background:#fff; border:2px solid var(--ink); box-shadow:var(--shadow-sm); overflow:hidden; display:flex; flex-direction:column; }
-.dev-panel-head { padding:10px 14px; border-bottom:1px solid var(--ink); font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:.5px; background:var(--paper); }
+.dev-panel { background:var(--surface); border:1px solid var(--border); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; }
+.dev-panel-head { padding:10px 14px; border-bottom:1px solid var(--border); font-weight:600; font-size:14px; }
 .dev-panel-body { padding:12px; overflow:auto; flex:1; }
-.dev-file-item { padding:6px 10px; cursor:pointer; margin-bottom:2px; font-size:13px; border:1px solid transparent; background:#fff; }
-.dev-file-item:hover, .dev-file-item.active { background:var(--accent-soft); border-color:var(--accent); }
-.dev-editor { width:100%; min-height:420px; font-family:Consolas,Monaco,monospace; font-size:13px; border:2px solid var(--ink); padding:12px; resize:vertical; background:#fff; color:var(--ink); }
-.dev-editor:focus { border-color:var(--accent); outline:none; }
-.dev-tabs .btn { font-size:12px; border-width:2px; }
-.dev-test-out { background:var(--paper); border:2px solid var(--ink); padding:10px; font-family:monospace; font-size:12px; max-height:280px; overflow:auto; white-space:pre-wrap; }
+.dev-file-item { padding:8px 10px; border-radius:8px; cursor:pointer; margin-bottom:4px; font-size:13px; border:1px solid transparent; }
+.dev-file-item:hover, .dev-file-item.active { background:var(--surface-2); border-color:var(--accent); }
+.dev-editor { width:100%; min-height:420px; font-family:Consolas,Monaco,monospace; font-size:13px; border:1px solid var(--border); border-radius:8px; padding:12px; resize:vertical; background:var(--paper); color:var(--ink); }
+.dev-tabs .btn { font-size:12px; }
+.dev-test-out { background:var(--surface-2); border-radius:8px; padding:10px; font-family:monospace; font-size:12px; max-height:280px; overflow:auto; white-space:pre-wrap; }
 </style>
 {% endblock %}
 

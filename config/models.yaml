@@ -1,84 +1,75 @@
+# AI 模型配置 — 仅通过 API 接入（不再使用本地 Qwen 权重）
 default: bailian:qwen-plus
+
 models:
-- api_key_env: BAILIAN_API_KEY
-  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-  description: 阿里百炼 Qwen-Plus，性价比高，适合日常审计分析
-  id: bailian:qwen-plus
-  model: qwen-plus
-  name: 通义千问 Plus（百炼）
-  provider: openai_compat
-- api_key_env: BAILIAN_API_KEY
-  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-  description: 阿里百炼 Qwen-Max，最强能力，适合复杂审计推理
-  id: bailian:qwen-max
-  model: qwen-max
-  name: 通义千问 Max（百炼）
-  provider: openai_compat
-- api_key_env: BAILIAN_API_KEY
-  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-  description: 阿里百炼 Qwen-Turbo，速度最快，适合简单查询
-  id: bailian:qwen-turbo
-  model: qwen-turbo
-  name: 通义千问 Turbo（百炼）
-  provider: openai_compat
-- api_key_env: BAILIAN_API_KEY
-  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-  description: 阿里百炼多模态视觉模型，支持图片识别（OCR表格/发票）
-  id: bailian:qwen-vl-plus
-  model: qwen-vl-plus
-  name: 通义千问 VL Plus（百炼·视觉）
-  provider: openai_compat
-- api_key_env: BAILIAN_API_KEY
-  base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
-  description: 在 Web UI 中修改 model 字段为你购买的任意百炼模型
-  id: bailian:custom
-  model: qwen-plus
-  name: 自定义百炼模型
-  provider: openai_compat
-- api_key_env: BAILIAN_API_KEY
-  base_url: https://dashscope.aliyuncs.com/api/v1
-  description: 阿里百炼 DashScope 原生协议，支持更多高级参数
-  id: bailian:dashscope-qwen-plus
-  model: qwen-plus
-  name: 通义千问 Plus（DashScope原生）
-  provider: dashscope
-- api_key_env: DEEPSEEK_API_KEY
-  base_url: https://api.deepseek.com/v1
-  description: DeepSeek 云端模型，性价比极高
-  id: deepseek:chat
-  model: deepseek-chat
-  name: DeepSeek Chat
-  provider: openai_compat
-- api_key_env: OPENAI_API_KEY
-  base_url: https://api.openai.com/v1
-  description: OpenAI 官方轻量模型
-  id: openai:gpt-4o-mini
-  model: gpt-4o-mini
-  name: OpenAI GPT-4o Mini
-  provider: openai_compat
-- api_key_env: OPENAI_API_KEY
-  base_url: https://api.openai.com/v1
-  description: OpenAI 官方旗舰模型
-  id: openai:gpt-4o
-  model: gpt-4o
-  name: OpenAI GPT-4o
-  provider: openai_compat
-- description: 项目内置本地小模型，无需联网和 API Key
-  id: local:qwen2.5-0.5b
-  model: Qwen2.5-0.5B-Instruct
-  name: Qwen2.5-0.5B（本地）
-  provider: local
-- api_key_env: CUSTOM_API_KEY
-  base_url: http://localhost:11434/v1
-  description: Ollama 本地模型，安装 Ollama 后自动发现
-  id: custom:ollama
-  model: qwen2.5:7b
-  name: Ollama 本地
-  provider: openai_compat
-- api_key_env: CUSTOM_API_KEY
-  base_url: http://localhost:1234/v1
-  description: LM Studio 本地模型
-  id: custom:lmstudio
-  model: auto
-  name: LM Studio 本地
-  provider: openai_compat
+  - id: bailian:qwen-plus
+    name: 通义千问 Plus（百炼）
+    provider: openai_compat
+    model: qwen-plus
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_env: BAILIAN_API_KEY
+    description: 阿里百炼 Qwen-Plus，性价比高，适合日常审计分析
+
+  - id: bailian:qwen-max
+    name: 通义千问 Max（百炼）
+    provider: openai_compat
+    model: qwen-max
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_env: BAILIAN_API_KEY
+    description: 阿里百炼 Qwen-Max，适合复杂审计推理
+
+  - id: bailian:qwen-turbo
+    name: 通义千问 Turbo（百炼）
+    provider: openai_compat
+    model: qwen-turbo
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_env: BAILIAN_API_KEY
+    description: 阿里百炼 Qwen-Turbo，速度最快
+
+  - id: bailian:qwen-vl-plus
+    name: 通义千问 VL Plus（百炼·视觉）
+    provider: openai_compat
+    model: qwen-vl-plus
+    base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+    api_key_env: BAILIAN_API_KEY
+    description: 多模态视觉模型，支持图片/发票 OCR
+
+  - id: bailian:dashscope-qwen-plus
+    name: 通义千问 Plus（DashScope原生）
+    provider: dashscope
+    model: qwen-plus
+    base_url: https://dashscope.aliyuncs.com/api/v1
+    api_key_env: BAILIAN_API_KEY
+    description: DashScope 原生协议
+
+  - id: deepseek:chat
+    name: DeepSeek Chat
+    provider: openai_compat
+    model: deepseek-chat
+    base_url: https://api.deepseek.com/v1
+    api_key_env: DEEPSEEK_API_KEY
+    description: DeepSeek 云端模型
+
+  - id: openai:gpt-4o-mini
+    name: OpenAI GPT-4o Mini
+    provider: openai_compat
+    model: gpt-4o-mini
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    description: OpenAI 官方轻量模型
+
+  - id: openai:gpt-4o
+    name: OpenAI GPT-4o
+    provider: openai_compat
+    model: gpt-4o
+    base_url: https://api.openai.com/v1
+    api_key_env: OPENAI_API_KEY
+    description: OpenAI 官方旗舰模型
+
+  - id: custom:openai-compat
+    name: 自定义 OpenAI 兼容端点
+    provider: openai_compat
+    model: your-model-name
+    base_url: http://localhost:11434/v1
+    api_key_env: CUSTOM_API_KEY
+    description: Ollama / vLLM / LM Studio 等 OpenAI 兼容 API

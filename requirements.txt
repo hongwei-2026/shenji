@@ -11,9 +11,3 @@ pydub>=0.25.1
 gunicorn>=21.0
 flask-compress>=1.14
 PyYAML>=6.0
---extra-index-url https://download.pytorch.org/whl/cpu
-torch>=2.0
-transformers>=4.44
-accelerate>=0.33
-huggingface_hub>=0.24
-safetensors>=0.4

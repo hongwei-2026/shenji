@@ -371,21 +371,36 @@ function sendAiMessage() {
   if (!msg) return;
 
   body.innerHTML += `<div class="ai-message ai-user"><div class="ai-bubble">${msg.replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div></div>`;
-  body.innerHTML += '<div class="ai-message ai-bot"><div class="ai-bubble ai-typing">思考中</div></div>';
+  body.innerHTML += '<div class="ai-message ai-bot"><div class="ai-bubble ai-typing">处理中</div></div>';
   body.scrollTop = body.scrollHeight;
   input.value = '';
 
   fetch('/api/ai/chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message: msg }),
+    credentials: 'same-origin',
+    body: JSON.stringify({ message: msg, use_agent: false }),
   })
-    .then(r => r.json())
+    .then(async r => {
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        const text = await r.text();
+        const hint = r.status === 404 ? '接口不存在，请 Ctrl+F5 刷新后重试'
+          : r.status === 401 ? '登录已过期，请重新登录'
+          : r.status >= 500 ? '服务繁忙，请稍后再试'
+          : (text.slice(0, 80) || `HTTP ${r.status}`);
+        throw new Error(hint);
+      }
+      return r.json();
+    })
     .then(data => {
       body.querySelector('.ai-typing')?.parentElement?.remove();
       if (data.success) {
-        const reply = data.reply.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g, '<br>');
-        body.innerHTML += `<div class="ai-message ai-bot"><div class="ai-bubble">${reply}</div></div>`;
+        const replyHtml = typeof formatAgentReply === 'function'
+          ? formatAgentReply(data.reply, data)
+          : data.reply.replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g, '<br>');
+        body.innerHTML += `<div class="ai-message ai-bot"><div class="ai-bubble">${replyHtml}</div></div>`;
+        if (typeof handleAgentResponse === 'function') handleAgentResponse(data);
       } else {
         body.innerHTML += `<div class="ai-message ai-bot"><div class="ai-bubble text-danger">错误: ${data.error||'请求失败'}</div></div>`;
       }
@@ -432,6 +447,13 @@ function initUnreadPolling() {
         }
       }).catch(() => {});
   }
-  check();
-  setInterval(check, 4000);
+  function tick() {
+    if (document.hidden) return;
+    check();
+  }
+  tick();
+  setInterval(tick, 15000);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) tick();
+  });
 }

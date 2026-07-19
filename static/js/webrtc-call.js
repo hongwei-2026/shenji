@@ -10,13 +10,19 @@ let peerConnection = null;
 let isCaller = false;
 let incomingBanner = null;
 let pendingCallerId = null;
+let pendingIceCandidates = [];
+const appliedIceKeys = new Set();
 
 const rtcConfig = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun.cloudflare.com:3478' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
   ],
+  iceCandidatePoolSize: 10,
 };
 
 const callFetchOpts = { credentials: 'same-origin' };
@@ -128,6 +134,7 @@ async function answerIncomingCall(callerId, offer) {
     await peerConnection.setRemoteDescription(offer);
     const answer = await peerConnection.createAnswer();
     await peerConnection.setLocalDescription(answer);
+    await flushPendingIce();
     const ansRes = await callJson('/api/call/answer', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -143,12 +150,57 @@ async function answerIncomingCall(callerId, offer) {
   }
 }
 
+async function addIceCandidateSafe(candidate) {
+  if (!peerConnection || !candidate) return;
+  const key = JSON.stringify(candidate);
+  if (appliedIceKeys.has(key)) return;
+  if (!peerConnection.remoteDescription) {
+    pendingIceCandidates.push(candidate);
+    return;
+  }
+  try {
+    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    appliedIceKeys.add(key);
+  } catch (e) {
+    console.warn('[WebRTC] ICE add failed:', e);
+  }
+}
+
+async function flushPendingIce() {
+  if (!peerConnection?.remoteDescription) return;
+  const queue = pendingIceCandidates.splice(0);
+  for (const c of queue) {
+    await addIceCandidateSafe(c);
+  }
+}
+
+function attachRemoteStream(ev) {
+  const remote = document.getElementById('remoteVideo');
+  if (!remote) return;
+  const stream = ev.streams?.[0] || new MediaStream([ev.track]);
+  if (remote.srcObject !== stream) {
+    remote.srcObject = stream;
+  }
+  const playPromise = remote.play();
+  if (playPromise) {
+    playPromise.catch(() => {
+      remote.muted = true;
+      remote.play().finally(() => { remote.muted = false; }).catch(() => {});
+    });
+  }
+}
+
 async function createPeerConnection() {
+  pendingIceCandidates = [];
+  appliedIceKeys.clear();
   peerConnection = new RTCPeerConnection(rtcConfig);
   localStream.getTracks().forEach((track) => peerConnection.addTrack(track, localStream));
-  peerConnection.ontrack = (ev) => {
-    const remote = document.getElementById('remoteVideo');
-    if (remote && ev.streams[0]) remote.srcObject = ev.streams[0];
+  peerConnection.ontrack = attachRemoteStream;
+  peerConnection.onconnectionstatechange = () => {
+    const st = peerConnection?.connectionState;
+    const statusEl = document.getElementById('callStatus');
+    if (st === 'connected' && statusEl) statusEl.textContent = '通话中';
+    if (st === 'failed') showToast('视频连接失败，请重试', 'error');
   };
   peerConnection.onicecandidate = (ev) => {
     if (ev.candidate && callPeerId) {
@@ -182,13 +234,16 @@ async function pollCallSignals() {
 
     if (isCaller && d.answer && peerConnection && !peerConnection.currentRemoteDescription) {
       await peerConnection.setRemoteDescription(d.answer);
-      document.getElementById('callStatus').textContent = '通话中';
+      document.getElementById('callStatus').textContent = '连接中…';
     }
 
     if (d.ice?.length && peerConnection) {
-      for (const c of d.ice) {
-        try { await peerConnection.addIceCandidate(c); } catch (e) { /* ignore */ }
-      }
+      for (const c of d.ice) await addIceCandidateSafe(c);
+    }
+    await flushPendingIce();
+
+    if (peerConnection?.connectionState === 'connected') {
+      document.getElementById('callStatus').textContent = '通话中';
     }
   } catch (e) { /* ignore */ }
 }
@@ -228,6 +283,8 @@ function endVideoCall() {
   if (remoteV) remoteV.srcObject = null;
   callPeerId = null;
   isCaller = false;
+  pendingIceCandidates = [];
+  appliedIceKeys.clear();
 }
 
 function showIncomingBanner(callerId, callerName, offer) {

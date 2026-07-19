@@ -116,7 +116,8 @@ def clean_data(df: pd.DataFrame) -> pd.DataFrame:
                 df[col] = numeric_vals
             else:
                 df.iloc[:, i] = df.iloc[:, i].fillna('').astype(str).str.strip()
-    return df
+    # 保证行号与编辑器位置索引一致（iloc / 前端 row 对齐）
+    return df.reset_index(drop=True)
 
 
 def detect_column_types(df: pd.DataFrame) -> dict:
@@ -686,17 +687,30 @@ def get_table_data(table_id: str, page: int = 1, per_page: int = 50) -> dict:
 
 
 def update_cell(table_id: str, row_idx: int, column: str, value: Any) -> dict:
-    """更新单元格"""
+    """更新单元格（按位置索引，与编辑器行号一致）"""
     t = _tables.get(table_id)
     if not t:
         return {'success': False, 'error': '表不存在'}
     df = t['df']
     try:
-        df.at[row_idx, column] = value
-        # 刷新缓存
+        if row_idx < 0 or row_idx >= len(df):
+            return {'success': False, 'error': f'行索引越界: {row_idx}'}
+        if column not in df.columns:
+            return {'success': False, 'error': f'列不存在: {column}'}
+        # 编辑器传入的是位置下标，必须用 iloc，不能用 label 的 at
+        col_pos = df.columns.get_loc(column)
+        if isinstance(col_pos, (slice, list)) or hasattr(col_pos, '__iter__') and not isinstance(col_pos, (str, int)):
+            col_pos = int(list(col_pos)[0]) if not isinstance(col_pos, int) else col_pos
+        # 允许写入任意文本，避免数值列赋值失败
+        if df.dtypes.iloc[col_pos] != object:
+            df[column] = df[column].astype(object)
+            col_pos = df.columns.get_loc(column)
+        df.iloc[row_idx, col_pos] = value
+        t['df'] = df
         t['summary'] = generate_summary(df)
         t['preview_data'] = df.head(100).fillna('').to_dict(orient='records')
         t['preview_columns'] = list(df.columns)
+        t['dirty'] = True
         return {'success': True}
     except Exception as e:
         return {'success': False, 'error': str(e)}
@@ -811,6 +825,103 @@ def export_table_snapshot(table_id: str) -> dict | None:
         'rows': df.fillna('').to_dict(orient='records'),
         'filename': t['filename'],
     }
+
+
+def persist_table(table_id: str, user_id: int | None) -> None:
+    """把内存表写入 SQLite，并同步关联的历史记录。"""
+    if not user_id or not table_id:
+        return
+    t = _tables.get(table_id)
+    if not t:
+        return
+    try:
+        from modules.database import upsert_working_table, update_history_table_data
+        upsert_working_table(user_id, table_id, t.get('filename', ''), t['df'])
+        hid = t.get('history_id')
+        if hid:
+            update_history_table_data(int(hid), t['df'], user_id)
+    except Exception as exc:
+        print(f'[persist_table] {exc}', flush=True)
+
+
+def restore_working_tables_for_user(user_id: int, force: bool = False) -> int:
+    """从 SQLite 恢复当前用户的工作表到内存。
+
+    force=True：用数据库覆盖同 table_key 的内存表（协同写回后必须开启，
+    否则非空内存会一直展示旧数据）。
+    """
+    global _active_table_id
+    if not user_id:
+        return 0
+    if _tables and not force:
+        return 0
+    try:
+        from modules.database import list_working_tables, load_working_table
+        items = list_working_tables(user_id)
+    except Exception:
+        return 0
+    restored = 0
+    for item in items:
+        key = item['table_key']
+        packed = load_working_table(user_id, key)
+        if not packed:
+            continue
+        df = clean_data(packed['df'])
+        summary = generate_summary(df)
+        _tables[key] = {
+            'df': df,
+            'filename': packed.get('filename') or item.get('filename') or '未命名',
+            'file_hash': '',
+            'summary': summary,
+            'preview_data': df.head(100).fillna('').to_dict(orient='records'),
+            'preview_columns': list(df.columns),
+            'history_id': (_tables.get(key) or {}).get('history_id'),
+        }
+        if _active_table_id is None or force:
+            # force 时优先最新更新的表（list 已按 updated_at DESC）
+            if restored == 0:
+                _active_table_id = key
+        restored += 1
+    return restored
+
+
+def bind_table_history(table_id: str, history_id: int | None) -> None:
+    t = _tables.get(table_id)
+    if t and history_id:
+        t['history_id'] = history_id
+
+
+def apply_df_to_table(table_id: str, df: pd.DataFrame) -> bool:
+    """用新的 DataFrame 覆盖内存表（协同写回普通编辑）。"""
+    t = _tables.get(table_id)
+    if not t:
+        return False
+    df = clean_data(df.copy())
+    t['df'] = df
+    t['summary'] = generate_summary(df)
+    t['preview_data'] = df.head(100).fillna('').to_dict(orient='records')
+    t['preview_columns'] = list(df.columns)
+    t['dirty'] = True
+    return True
+
+
+def restore_table_as(table_id: str, df: pd.DataFrame, filename: str) -> str:
+    """按指定 table_id 写入内存（用于协同源表重建）。"""
+    global _active_table_id
+    df = clean_data(df.copy())
+    summary = generate_summary(df)
+    _tables[table_id] = {
+        'df': df,
+        'filename': filename or '协同表格',
+        'file_hash': '',
+        'summary': summary,
+        'preview_data': df.head(100).fillna('').to_dict(orient='records'),
+        'preview_columns': list(df.columns),
+        'history_id': None,
+    }
+    if _active_table_id is None:
+        _active_table_id = table_id
+    return table_id
 
 
 # ============================================================

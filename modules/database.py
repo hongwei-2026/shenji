@@ -7,6 +7,7 @@ import os
 import json
 import sqlite3
 import hashlib
+import threading
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -34,12 +35,17 @@ def _json_dumps(obj: Any) -> str:
 
 DB_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
 DB_PATH = os.path.join(DB_DIR, 'audit_history.db')
+_db_initialized = False
+_init_lock = threading.Lock()
 
 
 def _connect() -> sqlite3.Connection:
     os.makedirs(DB_DIR, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute('PRAGMA journal_mode=WAL')
+    conn.execute('PRAGMA synchronous=NORMAL')
+    conn.execute('PRAGMA busy_timeout=30000')
     return conn
 
 
@@ -51,6 +57,17 @@ def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition
 
 def init_db() -> None:
     """初始化 SQLite：用户表、记住登录 token 表、审计历史记录表、审计发现表、审计底稿表、好友表、消息表"""
+    global _db_initialized
+    if _db_initialized:
+        return
+    with _init_lock:
+        if _db_initialized:
+            return
+        _init_db_schema()
+        _db_initialized = True
+
+
+def _init_db_schema() -> None:
     with _connect() as conn:
         conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
@@ -170,7 +187,11 @@ def init_db() -> None:
         _ensure_column(conn, 'users', 'theme', "TEXT NOT NULL DEFAULT 'default'")
         _ensure_column(conn, 'users', 'page_style', "TEXT NOT NULL DEFAULT 'classic'")
         _ensure_column(conn, 'users', 'preferences', "TEXT NOT NULL DEFAULT '{}'")
+        _ensure_column(conn, 'users', 'company', "TEXT NOT NULL DEFAULT ''")
         _ensure_column(conn, 'messages', 'is_read', 'INTEGER DEFAULT 0')
+        _ensure_column(conn, 'messages', 'msg_type', "TEXT NOT NULL DEFAULT 'text'")
+        _ensure_column(conn, 'messages', 'media_url', "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, 'collab_sessions', 'source_table_id', 'TEXT')
         conn.execute('''
             CREATE TABLE IF NOT EXISTS notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -227,6 +248,90 @@ def init_db() -> None:
                 PRIMARY KEY (session_id, user_id),
                 FOREIGN KEY (session_id) REFERENCES collab_sessions(id),
                 FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        _ensure_column(conn, 'collab_presence', 'editing_row', 'INTEGER')
+        _ensure_column(conn, 'collab_presence', 'editing_column', 'TEXT')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS agent_conversations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                title TEXT NOT NULL DEFAULT '新对话',
+                messages_json TEXT NOT NULL DEFAULT '[]',
+                model_id TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS working_tables (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                table_key TEXT NOT NULL,
+                filename TEXT NOT NULL DEFAULT '',
+                table_json TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, table_key),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS fin_accounts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                code TEXT NOT NULL,
+                name TEXT NOT NULL,
+                category TEXT NOT NULL,
+                parent_code TEXT,
+                balance REAL NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(user_id, code),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS fin_periods (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                name TEXT NOT NULL,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'open',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS fin_vouchers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                period_id INTEGER,
+                voucher_no TEXT NOT NULL,
+                voucher_date TEXT NOT NULL,
+                summary TEXT,
+                status TEXT NOT NULL DEFAULT 'draft',
+                total_debit REAL NOT NULL DEFAULT 0,
+                total_credit REAL NOT NULL DEFAULT 0,
+                created_by INTEGER,
+                created_at TEXT NOT NULL,
+                posted_at TEXT,
+                UNIQUE(user_id, voucher_no),
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (period_id) REFERENCES fin_periods(id)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS fin_voucher_lines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                voucher_id INTEGER NOT NULL,
+                line_no INTEGER NOT NULL,
+                account_code TEXT NOT NULL,
+                account_name TEXT,
+                summary TEXT,
+                debit REAL NOT NULL DEFAULT 0,
+                credit REAL NOT NULL DEFAULT 0,
+                FOREIGN KEY (voucher_id) REFERENCES fin_vouchers(id)
             )
         ''')
         conn.execute('''
@@ -317,55 +422,8 @@ def init_db() -> None:
         _ensure_column(conn, 'history_records', 'phase1_results', 'TEXT')
         _ensure_column(conn, 'history_records', 'phase2_results', 'TEXT')
         _ensure_column(conn, 'history_records', 'phase3_results', 'TEXT')
-        # --- Agent 会话 ---
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS agent_conversations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                title TEXT NOT NULL DEFAULT '新对话',
-                messages_json TEXT NOT NULL DEFAULT '[]',
-                model_id TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )
-        ''')
-        # --- 财务核算 (from Yhm444) ---
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS fin_accounts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL, code TEXT NOT NULL, name TEXT NOT NULL,
-                category TEXT NOT NULL DEFAULT 'asset', parent_code TEXT, balance REAL DEFAULT 0,
-                created_at TEXT NOT NULL, UNIQUE(user_id, code)
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS fin_periods (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL, name TEXT NOT NULL,
-                start_date TEXT NOT NULL, end_date TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'open', created_at TEXT NOT NULL
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS fin_vouchers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL, period_id INTEGER, voucher_no TEXT NOT NULL,
-                voucher_date TEXT NOT NULL, summary TEXT, status TEXT NOT NULL DEFAULT 'draft',
-                total_debit REAL DEFAULT 0, total_credit REAL DEFAULT 0,
-                created_by INTEGER, created_at TEXT NOT NULL, posted_at TEXT,
-                FOREIGN KEY(user_id) REFERENCES users(id), FOREIGN KEY(period_id) REFERENCES fin_periods(id)
-            )
-        ''')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS fin_voucher_lines (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                voucher_id INTEGER NOT NULL, line_no INTEGER NOT NULL,
-                account_code TEXT NOT NULL, account_name TEXT, summary TEXT,
-                debit REAL DEFAULT 0, credit REAL DEFAULT 0,
-                FOREIGN KEY(voucher_id) REFERENCES fin_vouchers(id)
-            )
-        ''')
+        _ensure_column(conn, 'collab_presence', 'editing_row', 'INTEGER')
+        _ensure_column(conn, 'collab_presence', 'editing_column', 'TEXT')
         conn.commit()
 
 
@@ -378,17 +436,19 @@ def create_user(
     theme: str = 'default',
     page_style: str = 'classic',
     preferences: str | dict | None = None,
+    company: str = '',
 ) -> int:
     init_db()
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     if isinstance(preferences, dict):
         preferences = _json_dumps(preferences)
     preferences = preferences or '{}'
+    company = (company or '').strip()
     with _connect() as conn:
         cur = conn.execute(
-            '''INSERT INTO users (username, password_hash, created_at, role, theme, page_style, preferences)
-               VALUES (?, ?, ?, ?, ?, ?, ?)''',
-            (username, password_hash, now, role, theme, page_style, preferences),
+            '''INSERT INTO users (username, password_hash, created_at, role, theme, page_style, preferences, company)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+            (username, password_hash, now, role, theme, page_style, preferences, company),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -396,7 +456,7 @@ def create_user(
 
 def update_user_profile(user_id: int, **fields) -> bool:
     init_db()
-    allowed = {'role', 'theme', 'page_style', 'preferences'}
+    allowed = {'role', 'theme', 'page_style', 'preferences', 'company'}
     updates = {k: v for k, v in fields.items() if k in allowed and v is not None}
     if not updates:
         return False
@@ -411,6 +471,56 @@ def update_user_profile(user_id: int, **fields) -> bool:
         conn.commit()
     return True
 
+
+def auto_friend_same_company(user_id: int, company: str) -> int:
+    """同公司用户自动成为双向已接受好友，返回新建/更新数量。"""
+    company = (company or '').strip()
+    if not company or not user_id:
+        return 0
+    init_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    count = 0
+    with _connect() as conn:
+        peers = conn.execute(
+            'SELECT id FROM users WHERE company=? AND id!=? AND TRIM(company) != ""',
+            (company, user_id),
+        ).fetchall()
+        for p in peers:
+            peer_id = int(p['id'])
+            existing = conn.execute(
+                '''SELECT id, status FROM friends
+                   WHERE (user_id=? AND friend_id=?) OR (user_id=? AND friend_id=?)''',
+                (user_id, peer_id, peer_id, user_id),
+            ).fetchone()
+            if existing:
+                if existing['status'] != 'accepted':
+                    conn.execute('UPDATE friends SET status=? WHERE id=?', ('accepted', existing['id']))
+                    count += 1
+            else:
+                conn.execute(
+                    'INSERT INTO friends (user_id, friend_id, status, created_at) VALUES (?, ?, ?, ?)',
+                    (user_id, peer_id, 'accepted', now),
+                )
+                count += 1
+        conn.commit()
+    return count
+
+
+def list_company_colleagues(user_id: int) -> list[dict]:
+    """同公司同事（含已是好友的），用于聊天联系人。"""
+    init_db()
+    with _connect() as conn:
+        me = conn.execute('SELECT company FROM users WHERE id=?', (user_id,)).fetchone()
+        company = (me['company'] if me else '') or ''
+        company = company.strip()
+        if not company:
+            return []
+        rows = conn.execute(
+            '''SELECT id, username, role, company FROM users
+               WHERE company=? AND id!=? ORDER BY username''',
+            (company, user_id),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 def get_user_by_username(username: str) -> dict | None:
     init_db()
@@ -909,14 +1019,21 @@ def get_friend_requests(user_id: int) -> list[dict]:
 
 # ---- 即时消息 ----
 
-def send_message(sender_id: int, receiver_id: int, content: str) -> int:
+def send_message(
+    sender_id: int,
+    receiver_id: int,
+    content: str,
+    msg_type: str = 'text',
+    media_url: str = '',
+) -> int:
     """发送消息，返回消息 ID"""
     init_db()
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with _connect() as conn:
         cur = conn.execute(
-            'INSERT INTO messages (sender_id, receiver_id, content, created_at) VALUES (?, ?, ?, ?)',
-            (sender_id, receiver_id, content, now),
+            '''INSERT INTO messages (sender_id, receiver_id, content, created_at, msg_type, media_url)
+               VALUES (?, ?, ?, ?, ?, ?)''',
+            (sender_id, receiver_id, content, now, msg_type or 'text', media_url or ''),
         )
         conn.commit()
         return int(cur.lastrowid)
@@ -971,7 +1088,8 @@ def get_conversations(user_id: int) -> list[dict]:
                  WHERE sender_id=? OR receiver_id=?
                  GROUP BY other_id
                )
-               SELECT p.other_id, u.username, m.content AS last_msg, m.created_at AS last_time,
+               SELECT p.other_id, u.username, m.content AS last_msg, m.msg_type AS last_msg_type,
+                      m.created_at AS last_time,
                       (SELECT COUNT(*) FROM messages m4
                        WHERE m4.sender_id=p.other_id AND m4.receiver_id=? AND m4.is_read=0) AS unread
                FROM pairs p
@@ -980,7 +1098,13 @@ def get_conversations(user_id: int) -> list[dict]:
                ORDER BY p.last_id DESC''',
             (user_id, user_id, user_id, user_id),
         ).fetchall()
-    return [dict(r) for r in rows]
+    result = []
+    for r in rows:
+        item = dict(r)
+        if (item.get('last_msg_type') or 'text') == 'voice':
+            item['last_msg'] = '[语音消息]'
+        result.append(item)
+    return result
 
 
 def poll_incoming_messages(user_id: int, last_id: int = 0) -> list[dict]:
@@ -1204,17 +1328,20 @@ def is_friend(user_id: int, other_id: int) -> bool:
 
 # ---- 协同编辑 ----
 
-def create_collab_session(owner_id: int, title: str, table_data: dict) -> dict:
+def create_collab_session(owner_id: int, title: str, table_data: dict, source_table_id: str | None = None) -> dict:
     import secrets
     init_db()
     token = secrets.token_urlsafe(12)
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if source_table_id:
+        table_data = dict(table_data)
+        table_data['source_table_id'] = source_table_id
     payload = _json_dumps(table_data)
     with _connect() as conn:
         cur = conn.execute(
-            '''INSERT INTO collab_sessions (token, owner_id, title, table_data, version, created_at, updated_at)
-               VALUES (?, ?, ?, ?, 1, ?, ?)''',
-            (token, owner_id, title, payload, now, now),
+            '''INSERT INTO collab_sessions (token, owner_id, title, table_data, version, created_at, updated_at, source_table_id)
+               VALUES (?, ?, ?, ?, 1, ?, ?, ?)''',
+            (token, owner_id, title, payload, now, now, source_table_id),
         )
         session_id = int(cur.lastrowid)
         conn.execute(
@@ -1222,7 +1349,7 @@ def create_collab_session(owner_id: int, title: str, table_data: dict) -> dict:
             (session_id, owner_id, now),
         )
         conn.commit()
-    return {'id': session_id, 'token': token, 'title': title, 'version': 1}
+    return {'id': session_id, 'token': token, 'title': title, 'version': 1, 'source_table_id': source_table_id}
 
 
 def get_collab_session(token: str) -> dict | None:
@@ -1261,17 +1388,50 @@ def update_collab_table(token: str, table_data: dict) -> int:
     init_db()
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     payload = _json_dumps(table_data)
+    source_id = None
+    if isinstance(table_data, dict):
+        source_id = table_data.get('source_table_id')
     with _connect() as conn:
         row = conn.execute('SELECT version FROM collab_sessions WHERE token=?', (token,)).fetchone()
         if not row:
             return 0
         new_version = int(row['version']) + 1
-        conn.execute(
-            'UPDATE collab_sessions SET table_data=?, version=?, updated_at=? WHERE token=?',
-            (payload, new_version, now, token),
-        )
+        if source_id:
+            conn.execute(
+                '''UPDATE collab_sessions
+                   SET table_data=?, version=?, updated_at=?, source_table_id=?
+                   WHERE token=?''',
+                (payload, new_version, now, source_id, token),
+            )
+        else:
+            conn.execute(
+                'UPDATE collab_sessions SET table_data=?, version=?, updated_at=? WHERE token=?',
+                (payload, new_version, now, token),
+            )
         conn.commit()
     return new_version
+
+
+def set_collab_source_table_id(token: str, source_table_id: str) -> bool:
+    """补写协同会话的源表 ID，并写入 table_data JSON。"""
+    if not token or not source_table_id:
+        return False
+    init_db()
+    with _connect() as conn:
+        row = conn.execute('SELECT table_data FROM collab_sessions WHERE token=?', (token,)).fetchone()
+        if not row:
+            return False
+        try:
+            data = json.loads(row['table_data'] or '{}')
+        except Exception:
+            data = {}
+        data['source_table_id'] = source_table_id
+        conn.execute(
+            '''UPDATE collab_sessions SET source_table_id=?, table_data=? WHERE token=?''',
+            (source_table_id, _json_dumps(data), token),
+        )
+        conn.commit()
+    return True
 
 
 def touch_collab_presence(session_id: int, user_id: int) -> None:
@@ -1291,7 +1451,7 @@ def get_collab_online_members(session_id: int, within_seconds: int = 30) -> list
     cutoff = (datetime.now() - timedelta(seconds=within_seconds)).strftime('%Y-%m-%d %H:%M:%S')
     with _connect() as conn:
         rows = conn.execute(
-            '''SELECT cp.user_id, u.username, cp.last_seen
+            '''SELECT cp.user_id, u.username, cp.last_seen, cp.editing_row, cp.editing_column
                FROM collab_presence cp JOIN users u ON u.id = cp.user_id
                WHERE cp.session_id=? AND cp.last_seen >= ?
                ORDER BY cp.last_seen DESC''',
@@ -1300,87 +1460,23 @@ def get_collab_online_members(session_id: int, within_seconds: int = 30) -> list
     return [dict(r) for r in rows]
 
 
-# ── Agent 会话管理 ──
-
-def create_agent_conversation(user_id: int, title: str = '新对话', model_id: str | None = None) -> dict:
+def set_collab_editing_cell(session_id: int, user_id: int, row: int | None, column: str | None) -> None:
+    """上报或清除当前用户正在编辑的单元格。"""
     init_db()
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    title = title.strip()[:100] or '新对话'
     with _connect() as conn:
-        cur = conn.execute(
-            '''INSERT INTO agent_conversations (user_id, title, messages_json, model_id, created_at, updated_at)
-               VALUES (?, ?, '[]', ?, ?, ?)''',
-            (user_id, title, model_id, now, now),
+        conn.execute(
+            '''INSERT INTO collab_presence (session_id, user_id, last_seen, editing_row, editing_column)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(session_id, user_id) DO UPDATE SET
+                 last_seen=excluded.last_seen,
+                 editing_row=excluded.editing_row,
+                 editing_column=excluded.editing_column''',
+            (session_id, user_id, now, row, column),
         )
         conn.commit()
-        return {'id': cur.lastrowid, 'title': title, 'model_id': model_id, 'created_at': now, 'updated_at': now, 'message_count': 0}
 
 
-def list_agent_conversations(user_id: int) -> list[dict]:
-    init_db()
-    with _connect() as conn:
-        rows = conn.execute(
-            '''SELECT id, title, model_id, created_at, updated_at,
-               json_array_length(messages_json) as message_count
-               FROM agent_conversations WHERE user_id=?
-               ORDER BY updated_at DESC''',
-            (user_id,),
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-def get_agent_conversation(conv_id: int, user_id: int) -> dict | None:
-    init_db()
-    with _connect() as conn:
-        row = conn.execute(
-            'SELECT * FROM agent_conversations WHERE id=? AND user_id=?', (conv_id, user_id),
-        ).fetchone()
-    if not row:
-        return None
-    d = dict(row)
-    try:
-        d['messages'] = json.loads(d.get('messages_json', '[]'))
-    except (json.JSONDecodeError, TypeError):
-        d['messages'] = []
-    return d
-
-
-def save_agent_messages(conv_id: int, user_id: int, messages: list[dict], title: str | None = None) -> bool:
-    init_db()
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    if len(messages) > 80:
-        messages = messages[-80:]
-    messages_json = json.dumps(messages, ensure_ascii=False)
-    with _connect() as conn:
-        if title:
-            conn.execute(
-                'UPDATE agent_conversations SET messages_json=?, updated_at=?, title=? WHERE id=? AND user_id=?',
-                (messages_json, now, title[:100], conv_id, user_id),
-            )
-        else:
-            conn.execute(
-                'UPDATE agent_conversations SET messages_json=?, updated_at=? WHERE id=? AND user_id=?',
-                (messages_json, now, conv_id, user_id),
-            )
-        conn.commit()
-        return conn.total_changes > 0
-    return False
-
-
-def delete_agent_conversation(conv_id: int, user_id: int) -> bool:
-    init_db()
-    with _connect() as conn:
-        conn.execute('DELETE FROM agent_conversations WHERE id=? AND user_id=?', (conv_id, user_id))
-        conn.commit()
-        return conn.total_changes > 0
-
-
-def auto_title_from_message(message: str) -> str:
-    msg = message.strip()
-    title = msg[:30].replace('\n', ' ')
-    if len(msg) > 30:
-        title += '…'
-    return title if title else '新对话'
 # ---- 财务核算 ----
 
 _FIN_SEED_ACCOUNTS = [
@@ -1618,3 +1714,190 @@ def get_finance_overview(user_id: int) -> dict:
         'voucher_counts': {r['status']: r['cnt'] for r in counts},
         'account_count': len(accts),
     }
+
+
+# ── Agent 会话管理（SQLite 持久化）──
+
+def create_agent_conversation(user_id: int, title: str = '新对话', model_id: str | None = None) -> dict:
+    init_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    title = title.strip()[:100] or '新对话'
+    with _connect() as conn:
+        cur = conn.execute(
+            '''INSERT INTO agent_conversations (user_id, title, messages_json, model_id, created_at, updated_at)
+               VALUES (?, ?, '[]', ?, ?, ?)''',
+            (user_id, title, model_id, now, now),
+        )
+        conn.commit()
+        return {
+            'id': cur.lastrowid, 'title': title, 'model_id': model_id,
+            'created_at': now, 'updated_at': now, 'message_count': 0,
+        }
+
+
+def list_agent_conversations(user_id: int) -> list[dict]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            '''SELECT id, title, model_id, created_at, updated_at, messages_json
+               FROM agent_conversations WHERE user_id=?
+               ORDER BY updated_at DESC''',
+            (user_id,),
+        ).fetchall()
+    result = []
+    for r in rows:
+        d = dict(r)
+        try:
+            msgs = json.loads(d.pop('messages_json', '[]') or '[]')
+            d['message_count'] = len(msgs) if isinstance(msgs, list) else 0
+        except (json.JSONDecodeError, TypeError):
+            d.pop('messages_json', None)
+            d['message_count'] = 0
+        result.append(d)
+    return result
+
+
+def get_agent_conversation(conv_id: int, user_id: int) -> dict | None:
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            'SELECT * FROM agent_conversations WHERE id=? AND user_id=?', (conv_id, user_id),
+        ).fetchone()
+    if not row:
+        return None
+    d = dict(row)
+    try:
+        d['messages'] = json.loads(d.get('messages_json', '[]'))
+    except (json.JSONDecodeError, TypeError):
+        d['messages'] = []
+    return d
+
+
+def save_agent_messages(conv_id: int, user_id: int, messages: list[dict], title: str | None = None) -> bool:
+    init_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    if len(messages) > 80:
+        messages = messages[-80:]
+    messages_json = json.dumps(messages, ensure_ascii=False)
+    with _connect() as conn:
+        if title:
+            conn.execute(
+                'UPDATE agent_conversations SET messages_json=?, updated_at=?, title=? WHERE id=? AND user_id=?',
+                (messages_json, now, title[:100], conv_id, user_id),
+            )
+        else:
+            conn.execute(
+                'UPDATE agent_conversations SET messages_json=?, updated_at=? WHERE id=? AND user_id=?',
+                (messages_json, now, conv_id, user_id),
+            )
+        conn.commit()
+        return conn.total_changes > 0
+    return False
+
+
+def delete_agent_conversation(conv_id: int, user_id: int) -> bool:
+    init_db()
+    with _connect() as conn:
+        conn.execute('DELETE FROM agent_conversations WHERE id=? AND user_id=?', (conv_id, user_id))
+        conn.commit()
+        return conn.total_changes > 0
+
+
+def auto_title_from_message(message: str) -> str:
+    msg = message.strip()
+    title = msg[:30].replace('\n', ' ')
+    if len(msg) > 30:
+        title += '…'
+    return title if title else '新对话'
+
+
+# ── 编辑中的工作表持久化（防止退出编辑后修改丢失）──
+
+def upsert_working_table(user_id: int, table_key: str, filename: str, df: pd.DataFrame) -> None:
+    """将当前编辑表写入 SQLite，覆盖同 user+key。"""
+    if not user_id or not table_key:
+        return
+    init_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    payload = _json_dumps({
+        'columns': list(df.columns),
+        'rows': df.fillna('').astype(str).values.tolist(),
+    })
+    with _connect() as conn:
+        conn.execute(
+            '''INSERT INTO working_tables (user_id, table_key, filename, table_json, updated_at)
+               VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, table_key) DO UPDATE SET
+                 filename=excluded.filename,
+                 table_json=excluded.table_json,
+                 updated_at=excluded.updated_at''',
+            (user_id, table_key, filename or '', payload, now),
+        )
+        conn.commit()
+
+
+def list_working_tables(user_id: int) -> list[dict]:
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            '''SELECT table_key, filename, updated_at FROM working_tables
+               WHERE user_id=? ORDER BY updated_at DESC''',
+            (user_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def load_working_table(user_id: int, table_key: str) -> dict | None:
+    """返回 {filename, df} 或 None。"""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            'SELECT filename, table_json FROM working_tables WHERE user_id=? AND table_key=?',
+            (user_id, table_key),
+        ).fetchone()
+    if not row:
+        return None
+    try:
+        data = json.loads(row['table_json'] or '{}')
+        cols = data.get('columns') or []
+        rows = data.get('rows') or []
+        df = pd.DataFrame(rows, columns=cols) if cols else pd.DataFrame(rows)
+        return {'filename': row['filename'] or '未命名', 'df': df}
+    except Exception:
+        return None
+
+
+def delete_working_table(user_id: int, table_key: str) -> None:
+    init_db()
+    with _connect() as conn:
+        conn.execute(
+            'DELETE FROM working_tables WHERE user_id=? AND table_key=?',
+            (user_id, table_key),
+        )
+        conn.commit()
+
+
+def update_history_table_data(record_id: int, df: pd.DataFrame, user_id: int | None = None) -> bool:
+    """同步更新历史记录中的表格快照（编辑后不丢改）。"""
+    if not record_id:
+        return False
+    init_db()
+    table_json = _json_dumps({
+        'columns': list(df.columns),
+        'rows': df.fillna('').astype(str).values.tolist(),
+    })
+    with _connect() as conn:
+        if user_id is not None:
+            cur = conn.execute(
+                '''UPDATE history_records SET table_data=?, row_count=?, column_count=?
+                   WHERE id=? AND (user_id=? OR user_id IS NULL)''',
+                (table_json, len(df), len(df.columns), record_id, user_id),
+            )
+        else:
+            cur = conn.execute(
+                '''UPDATE history_records SET table_data=?, row_count=?, column_count=?
+                   WHERE id=?''',
+                (table_json, len(df), len(df.columns), record_id),
+            )
+        conn.commit()
+        return cur.rowcount > 0

@@ -19,8 +19,15 @@
 #editorTable { border-collapse:collapse; width:max-content; min-width:100%; font-size:13px; }
 #editorTable th .col-actions { margin-left:8px; cursor:pointer; opacity:0.6; }
 #editorTable th .col-actions:hover { opacity:1; }
-#editorTable td { padding:4px 8px; border:1px solid var(--line); max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#editorTable td { padding:4px 8px; border:1px solid var(--line); max-width:300px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; position:relative; }
 #editorTable td input { width:100%; border:none; outline:none; background:transparent; padding:2px 4px; font-size:13px; }
+#editorTable td.cell-remote-editing { box-shadow: inset 0 0 0 2px var(--editing-color, #0d6efd); background: color-mix(in srgb, var(--editing-color, #0d6efd) 8%, transparent); }
+#editorTable td .cell-editing-label {
+  position:absolute; top:0; right:0; font-size:10px; line-height:1.2; padding:1px 4px;
+  background:var(--editing-color, #0d6efd); color:#fff; border-radius:0 0 0 4px; pointer-events:none; z-index:1;
+}
+.collab-member-badge.editing { border-color: var(--member-color, var(--line)); }
+.collab-member-badge.editing::before { background: var(--member-color, var(--ok)); }
 .row-num { width:40px; text-align:center; background:var(--paper) !important; color:var(--ink-muted); font-size:11px; user-select:none; cursor:pointer; }
 .row-num:hover { background:var(--line) !important; }
 .pagination-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
@@ -35,6 +42,9 @@
     <div class="collab-members mt-1" id="collabMembers"></div>
   </div>
   <div class="d-flex gap-2 flex-wrap">
+    <button type="button" class="btn btn-sm btn-outline-secondary" onclick="exitCollabToNormalEdit()" title="写回并打开普通表格编辑">
+      <i class="bi bi-box-arrow-left"></i> 返回表格编辑
+    </button>
     <button class="btn btn-sm btn-primary" type="button" onclick="showCollabInviteModal()">
       <i class="bi bi-send"></i> 邀请好友协作
     </button>
@@ -61,7 +71,9 @@
       <button class="btn btn-sm btn-outline-primary" onclick="showAddColDialog()"><i class="bi bi-plus-circle"></i> 加列</button>
       <button class="btn btn-sm btn-outline-danger" onclick="deleteSelectedRow()"><i class="bi bi-trash"></i> 删行</button>
       <button class="btn btn-sm btn-outline-warning" id="saveIndicator"><i class="bi bi-check2"></i> 已自动保存</button>
-      <a href="/" class="btn btn-sm btn-success"><i class="bi bi-arrow-right"></i> 完成编辑，去审计</a>
+      <button type="button" class="btn btn-sm btn-success" id="btnFinishEdit" onclick="finishEditAndGo()">
+        <i class="bi bi-arrow-right"></i> 完成编辑，去审计
+      </button>
     </div>
   </div>
 </div>
@@ -72,7 +84,7 @@
 
 <div class="d-flex justify-content-between align-items-center mt-2">
   <div class="pagination-bar" id="pagination"></div>
-  <small class="text-muted">提示: 点击单元格编辑 | Tab 切换单元格 | 可邀请好友协同编辑同一表格</small>
+  <small class="text-muted">提示: 点击单元格编辑 | Tab 切换单元格 | 编辑时自动保存 | 可看到他人正在编辑的单元格</small>
 </div>
 
 <div class="modal fade" id="addColModal" tabindex="-1">
@@ -112,6 +124,11 @@ let collabToken = COLLAB_TOKEN || '';
 let collabVersion = 0;
 let collabSyncTimer = null;
 let isRemoteReload = false;
+let saveTimers = {};
+let pendingSavePromises = [];
+let activeEditCell = null;
+let collabMembers = [];
+const COLLAB_COLORS = ['#0d6efd','#198754','#dc3545','#fd7e14','#6f42c1','#20c997','#d63384','#0dcaf0'];
 
 let currentTableId = '';
 let currentPage = 1;
@@ -127,7 +144,63 @@ document.addEventListener('DOMContentLoaded', () => {
   } else {
     loadTables();
   }
+  // 普通模式与协同模式都要在离开页面前冲刷未保存编辑
+  window.addEventListener('pagehide', onLeaveEditPage);
+  window.addEventListener('beforeunload', onLeaveEditPage);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') onLeaveEditPage();
+  });
 });
+
+function onLeaveEditPage() {
+  flushAllSaves();
+  if (collabMode && collabToken) {
+    // 同步写回普通表格（keepalive 保证离开页面也能发出）
+    try {
+      navigator.sendBeacon(
+        '/api/collab/' + collabToken + '/apply',
+        new Blob([JSON.stringify({})], { type: 'application/json' })
+      );
+    } catch (e) {
+      fetch('/api/collab/' + collabToken + '/apply', {
+        method: 'POST',
+        credentials: 'same-origin',
+        keepalive: true,
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      }).catch(() => {});
+    }
+  }
+}
+
+function applyCollabToSource() {
+  if (!collabToken) return Promise.resolve({ success: true });
+  return fetch('/api/collab/' + collabToken + '/apply', {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}',
+  }).then(r => r.json());
+}
+
+function exitCollabToNormalEdit() {
+  const btn = document.getElementById('btnFinishEdit');
+  flushAllSaves().finally(() => {
+    applyCollabToSource().finally(() => {
+      window.location.href = '/edit';
+    });
+  });
+}
+
+function finishEditAndGo() {
+  const btn = document.getElementById('btnFinishEdit');
+  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 保存中…'; }
+  flushAllSaves().finally(() => {
+    const go = () => { window.location.href = '/'; };
+    if (collabMode) applyCollabToSource().finally(go);
+    else go();
+  });
+}
 
 function joinCollabAndLoad() {
   fetch('/api/collab/' + collabToken + '/join', { method: 'POST', credentials: 'same-origin' })
@@ -148,14 +221,81 @@ function startCollabSync() {
       .then(r => r.json())
       .then(d => {
         if (!d.success) return;
-        renderCollabMembers(d.members || []);
+        collabMembers = d.members || [];
+        renderCollabMembers(collabMembers);
+        applyRemoteEditingHighlights(collabMembers);
         if (d.changed) {
           collabVersion = d.version;
           isRemoteReload = true;
-          loadCollabData();
+          flushAllSaves().then(() => loadCollabData());
         }
       });
-  }, 2500);
+  }, 1500);
+}
+
+function memberColor(userId) {
+  return COLLAB_COLORS[Math.abs(userId) % COLLAB_COLORS.length];
+}
+
+function reportCollabEditing(row, col) {
+  if (!collabMode) return;
+  fetch('/api/collab/' + collabToken + '/editing', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ row: row, column: col }),
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.success && d.members) {
+        collabMembers = d.members;
+        renderCollabMembers(collabMembers);
+        applyRemoteEditingHighlights(collabMembers);
+      }
+    });
+}
+
+function clearCollabEditing() {
+  if (!collabMode) return;
+  fetch('/api/collab/' + collabToken + '/editing', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ row: null, column: null }),
+  });
+}
+
+function applyRemoteEditingHighlights(members) {
+  document.querySelectorAll('#editorTable td.cell-remote-editing').forEach(td => {
+    td.classList.remove('cell-remote-editing');
+    td.style.removeProperty('--editing-color');
+    td.querySelector('.cell-editing-label')?.remove();
+  });
+  if (!members || !members.length) return;
+  const myId = window.__currentUserId;
+  members.forEach(m => {
+    if (m.user_id === myId) return;
+    if (m.editing_row == null || !m.editing_column) return;
+    const td = findCellTd(m.editing_row, m.editing_column);
+    if (!td) return;
+    const color = memberColor(m.user_id);
+    td.classList.add('cell-remote-editing');
+    td.style.setProperty('--editing-color', color);
+    const label = document.createElement('span');
+    label.className = 'cell-editing-label';
+    label.textContent = m.username + ' 编辑中';
+    td.appendChild(label);
+  });
+}
+
+function findCellTd(row, col) {
+  const tr = document.querySelector('#editorTable tr.row-' + row);
+  if (!tr) return null;
+  const inputs = tr.querySelectorAll('td input');
+  for (const inp of inputs) {
+    if (inp.dataset.col === col) return inp.parentElement;
+  }
+  return null;
 }
 
 function renderCollabMembers(members) {
@@ -165,12 +305,26 @@ function renderCollabMembers(members) {
     el.innerHTML = '<span class="small text-muted">暂无在线协作者</span>';
     return;
   }
-  el.innerHTML = members.map(m =>
-    `<span class="collab-member-badge online"><i class="bi bi-person"></i>${escapeHtml(m.username)}</span>`
-  ).join('');
+  const myId = window.__currentUserId;
+  el.innerHTML = members.map(m => {
+    const editing = m.editing_row != null && m.editing_column;
+    const color = memberColor(m.user_id);
+    const editHint = editing
+      ? ` · 正在编辑 R${m.editing_row + 1}「${escapeHtml(m.editing_column)}」`
+      : '';
+    const cls = 'collab-member-badge online' + (editing ? ' editing' : '');
+  return `<span class="${cls}" style="--member-color:${color}"><i class="bi bi-person"></i>${escapeHtml(m.username)}${editHint}</span>`;
+  }).join('');
 }
 
 function loadCollabData() {
+  const preserved = activeEditCell ? {
+    row: activeEditCell.row,
+    col: activeEditCell.col,
+    value: activeEditCell.input.value,
+    input: activeEditCell.input,
+  } : null;
+
   fetch('/api/collab/' + collabToken + '/data?page=' + currentPage + '&per_page=50')
     .then(r => r.json())
     .then(data => {
@@ -179,9 +333,22 @@ function loadCollabData() {
       totalPages = data.total_pages;
       document.getElementById('tableInfo').textContent = data.total_rows + '行 × ' + data.columns.length + '列';
       document.getElementById('collabTitle').textContent = data.title || '';
-      renderCollabMembers(data.members || []);
+      collabMembers = data.members || [];
+      renderCollabMembers(collabMembers);
       renderTable(data.columns, data.rows, data.column_types);
       renderPagination(data);
+      if (preserved) {
+        const inp = document.querySelector(
+          '#editorTable tr.row-' + preserved.row + ' input[data-col="' + escAttr(preserved.col) + '"]'
+        );
+        if (inp) {
+          inp.value = preserved.value;
+          inp.setAttribute('data-orig', preserved.input.getAttribute('data-orig') || preserved.value);
+          inp.readOnly = false;
+          activeEditCell = { input: inp, row: preserved.row, col: preserved.col };
+        }
+      }
+      applyRemoteEditingHighlights(collabMembers);
       isRemoteReload = false;
     });
 }
@@ -331,10 +498,13 @@ function renderTable(columns, rows, colTypes) {
     html += '<td class="row-num" onclick="selectRow(' + idx + ', this)">' + (idx + 1) + '</td>';
     columns.forEach(col => {
       const val = row[col] != null ? String(row[col]) : '';
-      html += '<td ondblclick="editCell(this, ' + idx + ', \'' + esc(col) + '\')">' +
+      html += '<td data-row="' + idx + '" data-col="' + escAttr(col) + '">' +
         '<input value="' + esc(val) + '" readonly ' +
+        'data-row="' + idx + '" data-col="' + escAttr(col) + '" ' +
+        'data-orig="' + esc(val) + '" ' +
         'onfocus="startEdit(this, ' + idx + ', \'' + esc(col) + '\')" ' +
         'onblur="saveEdit(this, ' + idx + ', \'' + esc(col) + '\')" ' +
+        'oninput="onCellInput(this, ' + idx + ', \'' + esc(col) + '\')" ' +
         'onkeydown="handleKey(this, event, ' + idx + ', \'' + esc(col) + '\', ' + columns.length + ')" ' +
         'tabindex="' + (idx * columns.length + columns.indexOf(col) + 1) + '">' +
         '</td>';
@@ -346,42 +516,134 @@ function renderTable(columns, rows, colTypes) {
 }
 
 function esc(s) { return s.replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+function escAttr(s) { return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
+
+function cellKey(row, col) { return row + '::' + col; }
 
 function startEdit(input, row, col) {
   input.readOnly = false;
-  input.focus();
+  if (!input.hasAttribute('data-orig')) {
+    input.setAttribute('data-orig', input.value);
+  }
+  activeEditCell = { input, row, col };
+  if (collabMode) reportCollabEditing(row, col);
   input.select();
+}
+
+function onCellInput(input, row, col) {
+  scheduleSave(input, row, col, false);
+}
+
+function scheduleSave(input, row, col, immediate) {
+  const key = cellKey(row, col);
+  if (saveTimers[key]) clearTimeout(saveTimers[key]);
+  const run = () => {
+    delete saveTimers[key];
+    performSave(input, row, col, immediate);
+  };
+  if (immediate) run();
+  else saveTimers[key] = setTimeout(run, 500);
+}
+
+function performSave(input, row, col, keepalive) {
+  if (isRemoteReload) return Promise.resolve();
+  const newVal = input.value;
+  const oldVal = input.getAttribute('data-orig');
+  if (newVal === oldVal) return Promise.resolve();
+
+  const bodyObj = { row: row, column: col, value: newVal };
+  const body = JSON.stringify(bodyObj);
+
+  // 离开页面时优先用 sendBeacon，避免导航取消 fetch
+  if (keepalive && navigator.sendBeacon) {
+    try {
+      const blob = new Blob([body], { type: 'application/json' });
+      const ok = navigator.sendBeacon(apiBase() + '/cell', blob);
+      if (ok) {
+        input.setAttribute('data-orig', newVal);
+        return Promise.resolve({ success: true, beacon: true });
+      }
+    } catch (e) { /* fall through to fetch */ }
+  }
+
+  const opts = {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: body,
+  };
+  if (keepalive) opts.keepalive = true;
+
+  const p = fetch(apiBase() + '/cell', opts)
+    .then(async r => {
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) throw new Error('保存失败');
+      return r.json();
+    })
+    .then(d => {
+      const ind = document.getElementById('saveIndicator');
+      if (d.success) {
+        input.setAttribute('data-orig', newVal);
+        if (collabMode && d.version) collabVersion = d.version;
+        if (ind) {
+          ind.innerHTML = '<i class="bi bi-check2"></i> 已保存';
+          ind.classList.remove('btn-outline-warning'); ind.classList.add('btn-success');
+        }
+      } else if (ind) {
+        ind.innerHTML = '<i class="bi bi-exclamation-triangle"></i> 保存失败';
+        ind.classList.remove('btn-outline-warning'); ind.classList.add('btn-danger');
+      }
+      if (ind) setTimeout(() => {
+        ind.innerHTML = '<i class="bi bi-check2"></i> 已自动保存';
+        ind.classList.add('btn-outline-warning'); ind.classList.remove('btn-success','btn-danger');
+      }, 2000);
+      return d;
+    })
+    .catch(err => {
+      const ind = document.getElementById('saveIndicator');
+      if (ind) {
+        ind.innerHTML = '<i class="bi bi-exclamation-triangle"></i> 保存失败';
+        ind.classList.remove('btn-outline-warning'); ind.classList.add('btn-danger');
+      }
+      return { success: false, error: String(err) };
+    });
+  pendingSavePromises.push(p);
+  p.finally(() => {
+    pendingSavePromises = pendingSavePromises.filter(x => x !== p);
+  });
+  return p;
+}
+
+function flushAllSaves() {
+  Object.keys(saveTimers).forEach(k => {
+    clearTimeout(saveTimers[k]);
+    delete saveTimers[k];
+  });
+  const inputs = document.querySelectorAll('#editorTable td input');
+  inputs.forEach(inp => {
+    const row = parseInt(inp.dataset.row, 10);
+    const col = inp.dataset.col;
+    if (row == null || !col) return;
+    if (inp.value !== inp.getAttribute('data-orig')) {
+      performSave(inp, row, col, true);
+    }
+  });
+  if (collabMode) clearCollabEditing();
+  return Promise.all(pendingSavePromises);
 }
 
 function saveEdit(input, row, col) {
   input.readOnly = true;
-  const newVal = input.value;
-  const oldVal = input.getAttribute('data-orig');
-  if (newVal === oldVal) return;
-  if (isRemoteReload) return;
-  input.setAttribute('data-orig', newVal);
-
-  fetch(apiBase() + '/cell', {
-    method:'PUT',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({row: row, column: col, value: newVal})
-  })
-  .then(r => r.json())
-  .then(d => {
-    const ind = document.getElementById('saveIndicator');
-    if (d.success) {
-      if (collabMode && d.version) collabVersion = d.version;
-      ind.innerHTML = '<i class="bi bi-check2"></i> 已保存';
-      ind.classList.remove('btn-outline-warning'); ind.classList.add('btn-success');
-    } else {
-      ind.innerHTML = '<i class="bi bi-exclamation-triangle"></i> 保存失败';
-      ind.classList.remove('btn-outline-warning'); ind.classList.add('btn-danger');
-    }
-    setTimeout(() => {
-      ind.innerHTML = '<i class="bi bi-check2"></i> 已自动保存';
-      ind.classList.add('btn-outline-warning'); ind.classList.remove('btn-success','btn-danger');
-    }, 2000);
-  });
+  const key = cellKey(row, col);
+  if (saveTimers[key]) {
+    clearTimeout(saveTimers[key]);
+    delete saveTimers[key];
+  }
+  if (activeEditCell && activeEditCell.input === input) {
+    activeEditCell = null;
+    if (collabMode) clearCollabEditing();
+  }
+  performSave(input, row, col, false);
 }
 
 function handleKey(input, event, row, col, totalCols) {
@@ -394,9 +656,15 @@ function handleKey(input, event, row, col, totalCols) {
     const nextRow = event.shiftKey ? (colIdx === 0 ? row - 1 : row) : (colIdx >= totalCols - 1 ? row + 1 : row);
     setTimeout(() => focusCell(nextRow, event.shiftKey ? Math.max(0, totalCols - 1) : nextCol % totalCols), 50);
   } else if (event.key === 'Escape') {
+    const orig = input.getAttribute('data-orig');
+    if (orig != null) input.value = orig;
     input.readOnly = true;
-  } else {
-    input.setAttribute('data-orig', input.value);
+    const key = cellKey(row, col);
+    if (saveTimers[key]) { clearTimeout(saveTimers[key]); delete saveTimers[key]; }
+    if (activeEditCell && activeEditCell.input === input) {
+      activeEditCell = null;
+      if (collabMode) clearCollabEditing();
+    }
   }
 }
 
@@ -406,7 +674,7 @@ function focusCell(row, colIdx) {
   const td = tr.children[colIdx + 1];
   if (!td) return;
   const inp = td.querySelector('input');
-  if (inp) { inp.readOnly = false; inp.focus(); }
+  if (inp) { inp.readOnly = false; inp.focus(); inp.select(); }
 }
 
 function selectRow(idx, td) {

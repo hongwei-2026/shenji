@@ -6,7 +6,11 @@
 <title>登录 - 财务审计工作台</title>
 <link href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=9">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ ui_build|default('13') }}">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#c45c26">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
 </head>
 <body class="app-body auth-register-page" data-theme="default">
 <div class="auth-page">
@@ -41,6 +45,10 @@
             <label class="form-check-label" for="rememberMe">记住登录（30 天）</label>
           </div>
           <button type="submit" class="btn btn-primary w-100" id="loginBtn">登录</button>
+          <button type="button" class="btn btn-outline-secondary w-100 mt-2" data-pwa-install onclick="installFinanceApp()" style="display:none">
+            <i class="bi bi-download"></i> 安装到桌面（像 App 一样打开）
+          </button>
+          <p class="small text-muted mt-2 mb-0 text-center">也可用 Chrome/Edge 地址栏「安装」或菜单「创建快捷方式 → 在窗口中打开」</p>
         </form>
       </div>
 
@@ -68,10 +76,15 @@
               <label class="form-label">确认密码</label>
               <input type="password" class="form-control" name="password2" required minlength="4">
             </div>
+            <div class="col-12 mb-2" id="companyFieldWrap">
+              <label class="form-label">公司名称 <span class="text-danger" id="companyRequiredMark">*</span></label>
+              <input type="text" class="form-control" name="company" id="regCompany" placeholder="职业用户必填，同公司自动成为好友" maxlength="80">
+              <div class="form-text small">普通用户 / 学生可不填；其他职业必须填写，注册后同公司同事可直接聊天。</div>
+            </div>
           </div>
 
           <div id="customizePanel" class="register-customize mt-3">
-            <div class="small text-muted mb-2"><i class="bi bi-sliders"></i> 普通用户 / 学生可自定义界面与功能</div>
+            <div class="small text-muted mb-2"><i class="bi bi-sliders"></i> 普通用户 / 学生可自定义配色与版式（功能菜单按角色固定）</div>
             <div class="row g-2">
               <div class="col-md-4">
                 <label class="form-label small">页面配色</label>
@@ -91,20 +104,14 @@
               </div>
               <div class="col-md-4">
                 <label class="form-label small">强调色</label>
-                <input type="color" class="form-control form-control-color w-100" name="accent_color" id="regAccent" value="#ff6b00">
+                <input type="color" class="form-control form-control-color w-100" name="accent_color" id="regAccent" value="#a65f1a">
               </div>
             </div>
-            <div class="mt-3" id="regFeatures">
-              <label class="form-label small d-block mb-2">启用功能（含消息、视频通话、AI 助手等）</label>
-              <div class="register-feature-grid">
-                {% for key, label in features.items() %}
-                <label class="register-feature-item">
-                  <input class="form-check-input reg-feat" type="checkbox" value="{{ key }}" checked>
-                  <span>{{ label }}</span>
-                </label>
-                {% endfor %}
-              </div>
-            </div>
+          </div>
+
+          <div id="roleFeaturePreview" class="mt-3">
+            <label class="form-label small d-block mb-2">本角色可用功能（只读预览）</label>
+            <div class="register-feature-grid" id="roleFeatureGrid"></div>
           </div>
 
           <button type="submit" class="btn btn-primary w-100 mt-3" id="registerBtn">注册并登录</button>
@@ -115,22 +122,15 @@
 </div>
 
 <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
+<script src="{{ url_for('static', filename='js/pwa.js') }}?v={{ ui_build|default('13') }}"></script>
 <script>
 const nextUrl = {{ next_url|tojson }};
 const customizableRoles = {{ customizable_roles|tojson }};
+const professionalRoles = {{ professional_roles|tojson }};
 const roleLabels = {{ roles|tojson }};
-
-const ROLE_HINTS = {
-  audit_manager: '审计经理：完整权限，岩灰商务主题',
-  finance_director: '财务主管：完整权限，海蓝主题',
-  accountant: '会计：侧重账务处理与报表',
-  auditor: '审计：完整审计工作流',
-  cashier: '出纳：侧重收付与对账',
-  tax_assistant: '税务助理：侧重税务分析与申报',
-  consultant: '顾问：宽松布局，深色主题',
-  normal_user: '普通用户：可自选功能、配色与样式',
-  student: '学生：可自选功能、配色与样式（默认推荐）',
-};
+const featureLabels = {{ features|tojson }};
+const ROLE_HINTS = {{ role_hints|tojson }};
+const ROLE_DEFAULTS = {{ role_defaults|tojson }};
 
 function showError(msg) {
   document.getElementById('authError').textContent = msg;
@@ -149,12 +149,30 @@ function submitAuth(url, body, btn) {
     .catch(err => { showError('请求失败: ' + err.message); btn.disabled = false; });
 }
 
+function renderRoleFeatures(role) {
+  const feats = ROLE_DEFAULTS[role] || {};
+  const grid = document.getElementById('roleFeatureGrid');
+  grid.innerHTML = Object.keys(featureLabels).map(key => {
+    const on = !!feats[key];
+    return `<label class="register-feature-item ${on ? '' : 'opacity-50'}">
+      <input class="form-check-input" type="checkbox" disabled ${on ? 'checked' : ''}>
+      <span>${featureLabels[key]}</span>
+    </label>`;
+  }).join('');
+}
+
 function toggleCustomizePanel() {
   const role = document.getElementById('regRole').value;
   const panel = document.getElementById('customizePanel');
   const hint = document.getElementById('roleHint');
+  const companyInput = document.getElementById('regCompany');
+  const companyMark = document.getElementById('companyRequiredMark');
+  const needCompany = professionalRoles.includes(role);
   panel.style.display = customizableRoles.includes(role) ? 'block' : 'none';
   hint.textContent = ROLE_HINTS[role] || '';
+  companyInput.required = needCompany;
+  companyMark.style.display = needCompany ? 'inline' : 'none';
+  renderRoleFeatures(role);
 }
 
 document.getElementById('regRole').addEventListener('change', toggleCustomizePanel);
@@ -172,17 +190,21 @@ document.getElementById('registerForm').addEventListener('submit', e => {
   e.preventDefault();
   const fd = new FormData(e.target);
   if (fd.get('password') !== fd.get('password2')) { showError('两次密码不一致'); return; }
-  const features = {};
-  document.querySelectorAll('.reg-feat').forEach(cb => { features[cb.value] = cb.checked; });
+  const role = fd.get('role');
+  const company = (fd.get('company') || '').trim();
+  if (professionalRoles.includes(role) && !company) {
+    showError('职业用户注册必须填写公司名称');
+    return;
+  }
   submitAuth('/api/auth/register', {
     username: fd.get('username'),
     password: fd.get('password'),
     remember: true,
-    role: fd.get('role'),
+    role,
     theme: fd.get('theme'),
     page_style: fd.get('page_style'),
     accent_color: fd.get('accent_color'),
-    features,
+    company,
   }, document.getElementById('registerBtn'));
 });
 </script>

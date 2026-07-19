@@ -11,6 +11,8 @@ for port in 6006 6008 5000; do
     fi
     rm -f "$pid_file"
   fi
+  pkill -f "gunicorn.*0.0.0.0:${port}" 2>/dev/null || true
+  pkill -f "python3 app.py" 2>/dev/null || true
 done
 
 if command -v fuser >/dev/null 2>&1; then
