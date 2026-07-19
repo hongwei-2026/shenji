@@ -17,7 +17,7 @@ _CONFIG_PATH = _BASE / 'config' / 'models.yaml'
 
 def _load_config() -> dict:
     if not _CONFIG_PATH.exists():
-        return {'models': [], 'default': 'local:qwen2.5-0.5b'}
+        return {'models': [], 'default': 'bailian:qwen-plus'}
     with open(_CONFIG_PATH, encoding='utf-8') as f:
         return yaml.safe_load(f) or {}
 
@@ -53,16 +53,6 @@ def list_models() -> list[dict[str, Any]]:
         if d['id'] not in existing_ids:
             models.append(d)
 
-    if not models:
-        from modules.local_llm import is_model_ready, MODEL_NAME
-        models.append({
-            'id': 'local:qwen2.5-0.5b',
-            'name': MODEL_NAME,
-            'provider': 'local',
-            'description': '本地 Qwen 模型',
-            'available': is_model_ready(),
-            'is_default': True,
-        })
     return models
 
 
@@ -116,8 +106,8 @@ def _scan_local_endpoints() -> list[dict]:
 def _check_available(model_cfg: dict) -> bool:
     provider = model_cfg.get('provider', '')
     if provider == 'local':
-        from modules.local_llm import is_model_ready
-        return is_model_ready()
+        # 本地权重模式已停用，统一走 API
+        return False
     # 自动发现的模型视为可用
     if model_cfg.get('auto_discovered'):
         return True
@@ -129,7 +119,7 @@ def _check_available(model_cfg: dict) -> bool:
 
 def get_default_model_id() -> str:
     cfg = _load_config()
-    return cfg.get('default', 'local:qwen2.5-0.5b')
+    return cfg.get('default', 'bailian:qwen-plus')
 
 
 def _get_model_cfg(model_id: str | None) -> dict:
@@ -142,10 +132,14 @@ def _get_model_cfg(model_id: str | None) -> dict:
     discovered = _scan_local_endpoints()
     for d in discovered:
         if d['id'] == mid:
-            return {'id': mid, 'provider': 'openai_compat', 'model': d.get('model', mid), 'base_url': d.get('base_url', '')}
-    if mid == 'local:qwen2.5-0.5b':
-        return {'id': mid, 'provider': 'local', 'model': 'Qwen2.5-0.5B-Instruct'}
-    raise ValueError(f'未知模型: {mid}')
+            return {
+                'id': mid,
+                'provider': 'openai_compat',
+                'model': d.get('model', mid),
+                'base_url': d.get('base_url', ''),
+                'auto_discovered': True,
+            }
+    raise ValueError(f'未知模型: {mid}（请在 /models 配置 API 或选择已有模型）')
 
 
 def chat(
@@ -154,27 +148,28 @@ def chat(
     model_id: str | None = None,
     max_tokens: int = 1024,
     temperature: float = 0.7,
+    fast: bool | None = None,
+    use_cache: bool = True,
+    **_kwargs,
 ) -> str:
-    """统一聊天入口，自动根据 provider 选择协议。
+    """统一聊天入口，仅通过 API / OpenAI 兼容端点调用。
 
     支持的 provider:
-      - local: 本地 HuggingFace 模型
       - openai_compat: OpenAI 兼容协议（百炼兼容模式/DeepSeek/OpenAI/Ollama/vLLM）
       - dashscope: 阿里百炼 DashScope 原生协议
     """
+    del fast, use_cache  # 兼容旧调用签名；缓存由调用方自行处理
     cfg = _get_model_cfg(model_id)
-    provider = cfg.get('provider', 'local')
+    provider = cfg.get('provider', 'openai_compat')
 
     if provider == 'local':
-        from modules.local_llm import chat as local_chat, is_model_ready, get_model_path
-        if not is_model_ready():
-            raise RuntimeError(f'本地模型未就绪: {get_model_path()}')
-        return local_chat(messages, max_tokens=max_tokens, temperature=temperature)
+        raise RuntimeError(
+            '本地 Qwen 权重已停用。请到「模型管理」配置 BAILIAN_API_KEY / DEEPSEEK_API_KEY 等云端 API。'
+        )
 
     if provider == 'dashscope':
         return _chat_dashscope(cfg, messages, max_tokens=max_tokens, temperature=temperature)
 
-    # 默认走 OpenAI 兼容协议（百炼兼容模式也走这里）
     return _chat_openai_compatible(cfg, messages, max_tokens=max_tokens, temperature=temperature)
 
 

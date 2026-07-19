@@ -24,10 +24,24 @@ else
   if command -v fuser >/dev/null 2>&1; then
     fuser -k "${PORT}/tcp" 2>/dev/null || true
   fi
-  nohup python3 app.py >"$LOG_FILE" 2>&1 &
+  nohup gunicorn \
+    --bind "0.0.0.0:${PORT}" \
+    --workers 1 \
+    --worker-class gthread \
+    --threads 16 \
+    --keep-alive 5 \
+    --timeout 300 \
+    app:app >"$LOG_FILE" 2>&1 &
   echo $! >"$PID_FILE"
-  sleep 2
+  sleep 3
 fi
+
+for i in 1 2 3 4 5; do
+  if curl -sf "http://127.0.0.1:${PORT}/" >/dev/null; then
+    break
+  fi
+  sleep 2
+done
 
 if ! curl -sf "http://127.0.0.1:${PORT}/" >/dev/null; then
   echo "启动失败，查看日志: $LOG_FILE"

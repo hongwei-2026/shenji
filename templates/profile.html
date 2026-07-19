@@ -21,6 +21,14 @@
         </div>
         <h5 id="profileUsername">{{ g.current_user.username }}</h5>
         <p class="text-muted small">注册时间: <span id="profileCreatedAt">--</span></p>
+        <div class="text-start mt-3">
+          <label class="form-label small mb-1">公司</label>
+          <div class="input-group input-group-sm">
+            <input type="text" class="form-control" id="profileCompany" placeholder="填写公司后同公司自动好友" maxlength="80" value="{{ user_company|default('') }}">
+            <button type="button" class="btn btn-outline-primary" id="btnSaveCompany">保存</button>
+          </div>
+          <div class="form-text small">职业用户补填公司后，同公司同事会自动成为好友并可直接聊天。</div>
+        </div>
         <hr>
         <div class="row text-center">
           <div class="col-4">
@@ -129,9 +137,26 @@ function loadProfile() {
         document.getElementById('statHistory').textContent = d.stats.history_count || 0;
         document.getElementById('statFriends').textContent = d.stats.friends_count || 0;
         document.getElementById('statMessages').textContent = d.stats.messages_count || 0;
+        const companyInput = document.getElementById('profileCompany');
+        if (companyInput && d.user.company) companyInput.value = d.user.company;
       }
     });
 }
+
+document.getElementById('btnSaveCompany')?.addEventListener('click', () => {
+  const company = (document.getElementById('profileCompany')?.value || '').trim();
+  if (!company) { showToast('请填写公司名称', 'warning'); return; }
+  fetch('/api/profile/company', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ company }),
+  }).then(r => r.json()).then(d => {
+    if (d.success) {
+      showToast(d.auto_friends ? `已保存，并关联 ${d.auto_friends} 位同公司同事` : '公司已保存', 'success');
+      loadFriends();
+    } else showToast(d.error || '保存失败', 'error');
+  });
+});
 
 function loadFriends() {
   fetch('/api/friends')

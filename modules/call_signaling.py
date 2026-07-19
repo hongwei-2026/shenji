@@ -117,10 +117,7 @@ def poll(user_id: int, peer_id: int) -> dict:
         is_caller = user_id == room['caller_id']
         peer_ice_key = 'callee_ice' if is_caller else 'caller_ice'
         peer_ice = list(room[peer_ice_key])
-        conn.execute(
-            f'UPDATE call_rooms SET {peer_ice_key}=?, updated_at=? WHERE room_key=?',
-            ('[]', time.time(), key),
-        )
+        # 不在 poll 时清除 ICE，避免客户端尚未成功 add 时丢失候选
         conn.commit()
         return {
             'active': True,

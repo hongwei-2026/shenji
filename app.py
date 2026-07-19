@@ -1,6 +1,6 @@
 """
-财务大数据审计系统 - Flask 主应用
-流程: 上传数据 → 选择编辑或继续 → 仪表盘/预览/审计分析 → 报告导出
+智能财务系统 - Flask 主应用
+核算 · 审计 · 协作 · AI Agent
 """
 from __future__ import annotations
 
@@ -9,36 +9,19 @@ import io
 import json
 import base64
 from datetime import datetime, timedelta
-from pathlib import Path
-
-# ── 加载 .env 文件 ──
-_ENV_PATH = Path(__file__).resolve().parent / '.env'
-if _ENV_PATH.exists():
-    try:
-        import dotenv
-        dotenv.load_dotenv(_ENV_PATH)
-    except ImportError:
-        # 手动解析 .env（无依赖）
-        with open(_ENV_PATH, encoding='utf-8') as _f:
-            for _line in _f:
-                _line = _line.strip()
-                if _line and not _line.startswith('#') and '=' in _line:
-                    _key, _, _val = _line.partition('=')
-                    _key, _val = _key.strip(), _val.strip().strip('"').strip("'")
-                    if _key and _val and _key not in os.environ:
-                        os.environ[_key] = _val
 
 import pandas as pd
 import numpy as np
 
 from flask import (Flask, render_template, request, jsonify,
-                   session, send_file, redirect, url_for, g)
+                   session, send_file, send_from_directory, redirect, url_for, g)
 from flask.json.provider import DefaultJSONProvider
 from flask_compress import Compress
 
 from modules.data_processor import (
     process_upload, process_image_upload, import_table_data,
-    restore_table_from_df,
+    restore_table_from_df, persist_table, restore_working_tables_for_user,
+    bind_table_history,
     get_current_data, get_current_summary,
     get_tables, get_table, get_active_table,
     set_active_table, get_active_table_id,
@@ -81,6 +64,8 @@ app.config['MAX_CONTENT_LENGTH'] = 100 * 1024 * 1024  # 100MB
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=REMEMBER_DAYS)
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config['COMPRESS_LEVEL'] = 6
+app.config['COMPRESS_MIN_SIZE'] = 256
 
 
 class NumpyJSONProvider(DefaultJSONProvider):
@@ -102,12 +87,14 @@ Compress(app)
 os.makedirs(os.path.join(os.path.dirname(__file__), 'uploads'), exist_ok=True)
 os.makedirs(os.path.join(os.path.dirname(__file__), 'data', 'models'), exist_ok=True)
 init_db()
-
 try:
-    from modules.local_llm import preload_model
-    preload_model()
-except Exception as exc:
-    print(f'[AI] 本地模型预加载跳过: {exc}', flush=True)
+    from modules.enterprise_db import ensure_enterprise_schema
+    ensure_enterprise_schema()
+except Exception:
+    pass
+
+# AI 仅通过云端 / OpenAI 兼容 API 接入
+AI_MODEL = 'api'
 
 try:
     from modules.ai.registry import reload_extensions
@@ -121,15 +108,28 @@ def _add_cache_headers(response):
     if request.path.startswith('/static/'):
         response.cache_control.max_age = 86400 if '/vendor/' in request.path else 3600
         response.cache_control.public = True
+    elif response.content_type and 'text/html' in response.content_type:
+        response.cache_control.no_cache = True
+        response.cache_control.no_store = True
+        response.headers['Pragma'] = 'no-cache'
     return response
+
 
 # 当前会话的分析结果缓存（审计规则、异常检测、评分等），加载历史记录时一并恢复
 _analysis_cache = {}
 
-# 本地 AI 模型（Qwen2.5-0.5B-Instruct）
-from modules.local_llm import MODEL_NAME as AI_MODEL
+# 前端资源版本：每次发版递增，避免老账号浏览器缓存旧 UI
+UI_BUILD = '20260716d'
 
-_PUBLIC_PATHS = {'/login', '/api/auth/login', '/api/auth/register', '/api/auth/roles', '/favicon.ico'}
+
+@app.context_processor
+def inject_ui_build():
+    return {'ui_build': UI_BUILD}
+
+_PUBLIC_PATHS = {
+    '/login', '/api/auth/login', '/api/auth/register', '/api/auth/roles',
+    '/favicon.ico', '/manifest.webmanifest', '/sw.js',
+}
 
 
 @app.context_processor
@@ -137,8 +137,7 @@ def inject_user_ui():
     user = g.get('current_user')
     if not user:
         return {}
-    from modules.roles import get_user_features, get_role_label, parse_preferences
-    from modules.ai.builtin_tools import BUILTIN_TOOLS
+    from modules.roles import get_user_features, get_role_label, parse_preferences, get_user_company
     prefs = parse_preferences(user.get('preferences'))
     return {
         'user_theme': user.get('theme') or 'default',
@@ -146,7 +145,7 @@ def inject_user_ui():
         'user_role_label': get_role_label(user.get('role')),
         'user_features': get_user_features(user),
         'user_accent': prefs.get('accent_color'),
-        'builtin_count': len(BUILTIN_TOOLS),
+        'user_company': get_user_company(user),
     }
 
 
@@ -155,11 +154,10 @@ def _uid() -> int | None:
 
 
 def _safe_reply(result: dict) -> str:
-    """安全提取 Agent 回复文本，防止乱码和非字符串。"""
+    """安全提取 Agent 回复文本。"""
     reply = result.get('reply', '') if isinstance(result, dict) else str(result)
     if not isinstance(reply, str):
         reply = str(reply)
-    # 确保 UTF-8 安全
     return reply.encode('utf-8', errors='replace').decode('utf-8')
 
 
@@ -194,11 +192,35 @@ def favicon():
     )
 
 
+@app.route('/manifest.webmanifest')
+def web_manifest():
+    resp = send_from_directory(
+        os.path.join(app.root_path, 'static'),
+        'manifest.webmanifest',
+        mimetype='application/manifest+json',
+    )
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+
+@app.route('/sw.js')
+def service_worker():
+    """PWA Service Worker 必须挂在站点根路径，才能覆盖全站 scope。"""
+    resp = send_from_directory(
+        os.path.join(app.root_path, 'static'),
+        'sw.js',
+        mimetype='application/javascript',
+    )
+    resp.headers['Service-Worker-Allowed'] = '/'
+    resp.headers['Cache-Control'] = 'no-cache'
+    return resp
+
+
 @app.route('/login')
 def login_page():
     if g.current_user:
         return redirect(request.args.get('next') or url_for('index'))
-    from modules.roles import ROLES, THEMES, PAGE_STYLES, ALL_FEATURES, CUSTOMIZABLE_ROLES
+    from modules.roles import ROLES, THEMES, PAGE_STYLES, ALL_FEATURES, CUSTOMIZABLE_ROLES, PROFESSIONAL_ROLES, ROLE_HINTS, ROLE_DEFAULTS
     return render_template(
         'login.html',
         next_url=request.args.get('next', '/'),
@@ -207,6 +229,9 @@ def login_page():
         page_styles=PAGE_STYLES,
         features=ALL_FEATURES,
         customizable_roles=CUSTOMIZABLE_ROLES,
+        professional_roles=PROFESSIONAL_ROLES,
+        role_hints=ROLE_HINTS,
+        role_defaults={k: v['features'] for k, v in ROLE_DEFAULTS.items()},
     )
 
 
@@ -250,6 +275,7 @@ def api_auth_register():
         'page_style': data.get('page_style'),
         'features': data.get('features'),
         'accent_color': data.get('accent_color'),
+        'company': data.get('company'),
     }
     ok, msg, user_id = register_user(
         data.get('username', ''),
@@ -300,27 +326,82 @@ def edit_page():
     """电子表格编辑器（支持 ?collab=token 协同模式）"""
     collab_token = request.args.get('collab')
     if collab_token:
-        return render_template('edit.html', collab_token=collab_token)
-    return render_template('edit.html', collab_token=None)
+        return render_template('edit.html', collab_token=collab_token, ui_build=UI_BUILD)
+    uid = _uid()
+    if uid:
+        # 强制从 SQLite 覆盖内存，保证协同写回后普通编辑看到最新数据
+        restore_working_tables_for_user(uid, force=True)
+    if get_active_table() is None:
+        return redirect(url_for('index'))
+    return render_template('edit.html', collab_token=None, ui_build=UI_BUILD)
+
+
+@app.route('/finance')
+def finance_page():
+    return render_template('finance.html')
+
+
+@app.route('/finance/vouchers')
+def vouchers_page():
+    return render_template('vouchers.html')
+
+
+@app.route('/finance/receivables')
+def receivables_page():
+    return render_template('finance_receivables.html')
+
+
+@app.route('/finance/payables')
+def payables_page():
+    return render_template('finance_payables.html')
+
+
+@app.route('/finance/invoices')
+def invoices_page():
+    return render_template('finance_invoices.html')
+
+
+@app.route('/finance/reconciliation')
+def reconciliation_page():
+    return render_template('finance_reconciliation.html')
+
+
+@app.route('/workflow/approvals')
+def approvals_page():
+    return render_template('workflow_approvals.html')
+
+
+@app.route('/workflow/tasks')
+def tasks_page():
+    return render_template('workflow_tasks.html')
 
 
 @app.route('/dashboard')
 def dashboard_page():
+    if get_active_table() is None:
+        return redirect(url_for('index'))
     return render_template('dashboard.html')
 
 
 @app.route('/preview')
 def preview_page():
+    if get_active_table() is None:
+        return redirect(url_for('index'))
     return render_template('preview.html')
 
 
 @app.route('/analysis')
 def analysis_page():
+    if get_active_table() is None:
+        return redirect(url_for('index'))
     return render_template('analysis.html')
 
 
 @app.route('/report')
 def report_page():
+    global _analysis_cache
+    if not _analysis_cache:
+        return redirect(url_for('analysis_page'))
     return render_template('report.html')
 
 
@@ -328,40 +409,6 @@ def report_page():
 def history_page():
     """历史记录页面：展示已保存的审计会话，支持搜索与重新加载"""
     return render_template('history.html')
-
-
-# ── 财务核算页面 ──
-@app.route('/finance')
-def finance_page():
-    return render_template('finance.html')
-
-@app.route('/finance/vouchers')
-def vouchers_page():
-    return render_template('vouchers.html')
-
-@app.route('/finance/receivables')
-def receivables_page():
-    return render_template('finance_receivables.html')
-
-@app.route('/finance/payables')
-def payables_page():
-    return render_template('finance_payables.html')
-
-@app.route('/finance/invoices')
-def invoices_page():
-    return render_template('finance_invoices.html')
-
-@app.route('/finance/reconciliation')
-def reconciliation_page():
-    return render_template('finance_reconciliation.html')
-
-@app.route('/workflow/approvals')
-def approvals_page():
-    return render_template('workflow_approvals.html')
-
-@app.route('/workflow/tasks')
-def tasks_page():
-    return render_template('workflow_tasks.html')
 
 
 @app.route('/profile')
@@ -379,6 +426,12 @@ def agent_page():
     return render_template('agent.html')
 
 
+@app.route('/models')
+def models_page():
+    """AI 模型可视化管理页面。"""
+    return render_template('models.html')
+
+
 @app.route('/agent/develop')
 def agent_develop_page():
     """Agent 扩展开发文档页"""
@@ -388,18 +441,6 @@ def agent_develop_page():
         with open(readme_path, encoding='utf-8') as f:
             content = f.read()
     return render_template('agent_develop.html', readme_content=content)
-
-
-@app.route('/feishu/setup')
-def feishu_setup_page():
-    """飞书 Bot 配置页面。"""
-    return render_template('feishu_setup.html')
-
-
-@app.route('/models')
-def models_page():
-    """AI 模型可视化管理页面。"""
-    return render_template('models.html')
 
 
 @app.route('/search')
@@ -566,6 +607,10 @@ def _run_analysis_after_upload(first_result: dict, source_type: str = 'file') ->
             user_id=_uid(),
         )
         first_result['history_id'] = record_id
+        tid = first_result.get('table_id') or get_active_table_id()
+        if tid:
+            bind_table_history(tid, record_id)
+            persist_table(tid, _uid())
     except Exception as e:
         first_result['auto_analyze_error'] = str(e)
     return first_result
@@ -624,6 +669,9 @@ def api_import_table():
 @app.route('/api/tables')
 def api_tables():
     """列出所有表"""
+    uid = _uid()
+    if uid:
+        restore_working_tables_for_user(uid, force=True)
     tables = get_tables()
     return jsonify({
         'success': True,
@@ -683,16 +731,18 @@ def api_table_data(table_id):
     return jsonify(result)
 
 
-@app.route('/api/table/<table_id>/cell', methods=['PUT'])
+@app.route('/api/table/<table_id>/cell', methods=['PUT', 'POST'])
 def api_update_cell(table_id):
-    """更新单元格"""
-    data = request.get_json() or {}
+    """更新单元格（POST 兼容 sendBeacon）"""
+    data = request.get_json(silent=True) or {}
     row_idx = data.get('row')
     column = data.get('column')
     value = data.get('value')
     if row_idx is None or column is None:
         return jsonify({'success': False, 'error': '缺少 row 或 column 参数'})
     result = update_cell(table_id, int(row_idx), column, value)
+    if result.get('success'):
+        persist_table(table_id, _uid())
     return jsonify(result)
 
 
@@ -701,6 +751,8 @@ def api_add_row(table_id):
     """添加行"""
     data = request.get_json() or {}
     result = add_row(table_id, data)
+    if result.get('success'):
+        persist_table(table_id, _uid())
     return jsonify(result)
 
 
@@ -708,6 +760,8 @@ def api_add_row(table_id):
 def api_delete_row(table_id, row_idx):
     """删除行"""
     result = delete_row(table_id, row_idx)
+    if result.get('success'):
+        persist_table(table_id, _uid())
     return jsonify(result)
 
 
@@ -720,6 +774,8 @@ def api_add_column(table_id):
     if not col_name:
         return jsonify({'success': False, 'error': '列名不能为空'})
     result = add_column(table_id, col_name, default_value)
+    if result.get('success'):
+        persist_table(table_id, _uid())
     return jsonify(result)
 
 
@@ -727,12 +783,271 @@ def api_add_column(table_id):
 def api_delete_column(table_id, col_name):
     """删除列"""
     result = delete_column(table_id, col_name)
+    if result.get('success'):
+        persist_table(table_id, _uid())
     return jsonify(result)
+
+
+# ============================================================
+# API - 财务核算
+# ============================================================
+
+@app.route('/api/finance/overview')
+def api_finance_overview():
+    from modules.finance import overview, accounts, vouchers
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    data = overview(uid)
+    return jsonify({
+        'success': True,
+        **data,
+        'accounts': accounts(uid),
+        'recent_vouchers': vouchers(uid, limit=8),
+    })
+
+
+@app.route('/api/finance/accounts')
+def api_finance_accounts():
+    from modules.finance import accounts
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    return jsonify({'success': True, 'accounts': accounts(uid)})
+
+
+@app.route('/api/finance/vouchers', methods=['GET', 'POST'])
+def api_finance_vouchers():
+    from modules.finance import vouchers, create_voucher
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    if request.method == 'GET':
+        status = request.args.get('status')
+        limit = request.args.get('limit', 50, type=int)
+        return jsonify({'success': True, 'vouchers': vouchers(uid, limit=limit, status=status)})
+    data = request.get_json(silent=True) or {}
+    return jsonify(create_voucher(uid, data))
+
+
+@app.route('/api/finance/vouchers/<int:voucher_id>/post', methods=['POST'])
+def api_finance_post_voucher(voucher_id):
+    from modules.finance import approve_voucher
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    return jsonify(approve_voucher(uid, voucher_id))
+
+
+@app.route('/api/finance/vouchers/<int:voucher_id>/submit-approval', methods=['POST'])
+def api_finance_submit_approval(voucher_id):
+    from modules.finance import submit_voucher_approval
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    data = request.get_json(silent=True) or {}
+    return jsonify(submit_voucher_approval(uid, voucher_id, data.get('approver_id')))
+
+
+@app.route('/api/finance/vouchers/<int:voucher_id>/versions')
+def api_voucher_versions(voucher_id):
+    from modules.enterprise_db import list_doc_versions
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    return jsonify({'success': True, 'versions': list_doc_versions(uid, 'voucher', voucher_id)})
+
+
+@app.route('/api/finance/vouchers/<int:voucher_id>/versions/<int:version_no>')
+def api_voucher_version(voucher_id, version_no):
+    from modules.enterprise_db import get_doc_version
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    v = get_doc_version(uid, 'voucher', voucher_id, version_no)
+    if not v:
+        return jsonify({'success': False, 'error': '版本不存在'})
+    return jsonify({'success': True, 'version': v})
+
+
+@app.route('/api/finance/partners')
+def api_finance_partners():
+    from modules.enterprise_db import list_partners
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    ptype = request.args.get('type')
+    return jsonify({'success': True, 'partners': list_partners(uid, ptype)})
+
+
+@app.route('/api/finance/partners', methods=['POST'])
+def api_finance_partners_create():
+    from modules.enterprise_db import create_partner
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    data = request.get_json(silent=True) or {}
+    return jsonify({'success': True, 'partner_id': create_partner(uid, data)})
+
+
+@app.route('/api/finance/invoices', methods=['GET', 'POST'])
+def api_finance_invoices():
+    from modules.enterprise_db import list_invoices, create_invoice
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    if request.method == 'GET':
+        inv_type = request.args.get('type')
+        return jsonify({'success': True, 'invoices': list_invoices(uid, inv_type)})
+    data = request.get_json(silent=True) or {}
+    iid = create_invoice(uid, data)
+    from modules.enterprise_db import save_doc_version, list_invoices
+    invs = list_invoices(uid)
+    inv = next((x for x in invs if x['id'] == iid), None)
+    if inv:
+        save_doc_version(uid, 'invoice', iid, inv, message='开具发票', author_id=uid)
+    return jsonify({'success': True, 'invoice_id': iid})
+
+
+@app.route('/api/finance/invoices/<int:invoice_id>/pay', methods=['POST'])
+def api_finance_invoice_pay(invoice_id):
+    from modules.enterprise_db import record_invoice_payment
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    data = request.get_json(silent=True) or {}
+    record_invoice_payment(uid, invoice_id, float(data.get('amount', 0)))
+    return jsonify({'success': True})
+
+
+@app.route('/api/finance/bank/accounts')
+def api_finance_bank_accounts():
+    from modules.enterprise_db import list_bank_accounts
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    return jsonify({'success': True, 'accounts': list_bank_accounts(uid)})
+
+
+@app.route('/api/finance/bank/<int:bank_id>/txns')
+def api_finance_bank_txns(bank_id):
+    from modules.enterprise_db import list_bank_txns
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    return jsonify({'success': True, 'txns': list_bank_txns(bank_id, uid)})
+
+
+@app.route('/api/finance/bank/<int:bank_id>/import', methods=['POST'])
+def api_finance_bank_import(bank_id):
+    from modules.enterprise_db import import_bank_txns
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    data = request.get_json(silent=True) or {}
+    count = import_bank_txns(uid, bank_id, data.get('txns') or [])
+    return jsonify({'success': True, 'imported': count})
+
+
+@app.route('/api/finance/bank/<int:bank_id>/reconcile', methods=['POST'])
+def api_finance_bank_reconcile(bank_id):
+    from modules.enterprise_db import run_reconciliation
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    return jsonify({'success': True, **run_reconciliation(uid, bank_id)})
+
+
+@app.route('/api/workflow/approvals')
+def api_workflow_approvals():
+    from modules.enterprise_db import list_approvals
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    scope = request.args.get('scope', 'mine')
+    return jsonify({'success': True, 'approvals': list_approvals(uid, scope)})
+
+
+@app.route('/api/workflow/approvals/<int:approval_id>/<action>', methods=['POST'])
+def api_workflow_approval_act(approval_id, action):
+    from modules.enterprise_db import act_approval
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    if action not in ('approved', 'rejected'):
+        return jsonify({'success': False, 'error': '无效操作'})
+    data = request.get_json(silent=True) or {}
+    return jsonify(act_approval(uid, approval_id, action, data.get('comment', '')))
+
+
+@app.route('/api/workflow/tasks', methods=['GET', 'POST'])
+def api_workflow_tasks():
+    from modules.enterprise_db import list_tasks, create_task
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        tid = create_task(uid, data)
+        return jsonify({'success': True, 'task_id': tid})
+    scope = request.args.get('scope', 'assigned')
+    return jsonify({'success': True, 'tasks': list_tasks(uid, scope)})
+
+
+@app.route('/api/workflow/tasks/<int:task_id>/status', methods=['POST'])
+def api_workflow_task_status(task_id):
+    from modules.enterprise_db import update_task_status
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    data = request.get_json(silent=True) or {}
+    update_task_status(uid, task_id, data.get('status', 'done'))
+    return jsonify({'success': True})
+
+
+@app.route('/api/workflow/tasks/<int:task_id>/comments', methods=['GET', 'POST'])
+def api_workflow_task_comments(task_id):
+    from modules.enterprise_db import add_task_comment, list_task_comments
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    if request.method == 'POST':
+        data = request.get_json(silent=True) or {}
+        cid = add_task_comment(uid, task_id, data.get('content', ''))
+        return jsonify({'success': True, 'comment_id': cid})
+    return jsonify({'success': True, 'comments': list_task_comments(task_id)})
+
+
+@app.route('/api/finance/versions/<doc_type>/<int:doc_id>')
+def api_doc_versions(doc_type, doc_id):
+    from modules.enterprise_db import list_doc_versions, get_doc_version
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    vno = request.args.get('version', type=int)
+    if vno:
+        v = get_doc_version(uid, doc_type, doc_id, vno)
+        return jsonify({'success': bool(v), 'version': v})
+    return jsonify({'success': True, 'versions': list_doc_versions(uid, doc_type, doc_id)})
 
 
 # ============================================================
 # API - 协同编辑
 # ============================================================
+
+@app.route('/api/collab/<token>/apply', methods=['POST'])
+def api_collab_apply(token):
+    """将协同最新内容写回普通表格编辑（退出协同 / 切回表格编辑时调用）。"""
+    from modules.collab import sync_collab_to_source, can_access_collab
+    from modules.database import get_collab_session
+    session = get_collab_session(token)
+    if not session:
+        return jsonify({'success': False, 'error': '协同会话不存在'})
+    if not can_access_collab(session, _uid()):
+        return jsonify({'success': False, 'error': '无权操作'})
+    # 写回到拥有者的源表，保证任何人编辑后主人表格一致
+    return jsonify(sync_collab_to_source(token, session.get('owner_id')))
+
 
 @app.route('/api/collab/create', methods=['POST'])
 def api_collab_create():
@@ -757,6 +1072,22 @@ def api_collab_sync(token):
     return jsonify(get_sync_state(token, _uid(), since))
 
 
+@app.route('/api/collab/<token>/editing', methods=['POST'])
+def api_collab_editing(token):
+    """上报当前正在编辑的单元格（用于协同光标/高亮）。"""
+    from modules.collab import report_editing_cell
+    data = request.get_json(silent=True) or {}
+    row = data.get('row')
+    column = data.get('column')
+    if row is not None:
+        row = int(row)
+    if column is not None:
+        column = str(column)
+    if row is None or column is None:
+        row, column = None, None
+    return jsonify(report_editing_cell(token, _uid(), row, column))
+
+
 @app.route('/api/collab/<token>/data')
 def api_collab_data(token):
     from modules.collab import get_collab_page
@@ -765,7 +1096,7 @@ def api_collab_data(token):
     return jsonify(get_collab_page(token, _uid(), page, per_page))
 
 
-@app.route('/api/collab/<token>/cell', methods=['PUT'])
+@app.route('/api/collab/<token>/cell', methods=['PUT', 'POST'])
 def api_collab_cell(token):
     from modules.collab import update_collab_cell
     data = request.get_json(silent=True) or {}
@@ -1324,12 +1655,34 @@ def api_profile():
             'id': uid,
             'username': user['username'],
             'created_at': user.get('created_at', ''),
+            'role': user.get('role', ''),
+            'company': user.get('company') or '',
         },
         'stats': {
             'history_count': len(history),
             'friends_count': len(friends),
             'messages_count': get_unread_count(uid),
         },
+    })
+
+
+@app.route('/api/profile/company', methods=['POST'])
+def api_profile_update_company():
+    """补填/更新公司，并自动与同公司用户互为好友"""
+    data = request.get_json(silent=True) or {}
+    company = (data.get('company') or '').strip()
+    if not company:
+        return jsonify({'success': False, 'error': '公司名称不能为空'})
+    from modules.database import update_user_profile, auto_friend_same_company
+    from modules.roles import PROFESSIONAL_ROLES
+    user = g.current_user
+    update_user_profile(user['id'], company=company)
+    linked = auto_friend_same_company(user['id'], company)
+    return jsonify({
+        'success': True,
+        'company': company,
+        'auto_friends': linked,
+        'need_company': user.get('role') in PROFESSIONAL_ROLES,
     })
 
 
@@ -1475,6 +1828,58 @@ def api_send_message():
         )
     return jsonify({'success': True, 'message_id': msg_id})
 
+
+@app.route('/api/messages/send-voice', methods=['POST'])
+def api_send_voice_message():
+    """发送语音消息（浏览器 MediaRecorder 上传 webm/ogg/mp3）"""
+    receiver_id = request.form.get('receiver_id') or (request.get_json(silent=True) or {}).get('receiver_id')
+    if not receiver_id:
+        return jsonify({'success': False, 'error': '缺少接收者'})
+    receiver_id = int(receiver_id)
+    if receiver_id == _uid():
+        return jsonify({'success': False, 'error': '不能给自己发消息'})
+    audio = request.files.get('audio') or request.files.get('file')
+    if not audio or not audio.filename:
+        return jsonify({'success': False, 'error': '未收到音频文件'})
+    from modules.database import send_message, create_notification, get_user_by_id
+    receiver = get_user_by_id(receiver_id)
+    if not receiver:
+        return jsonify({'success': False, 'error': '接收者不存在'})
+    import uuid
+    from werkzeug.utils import secure_filename
+    ext = (secure_filename(audio.filename).rsplit('.', 1)[-1] or 'webm').lower()
+    if ext not in {'webm', 'ogg', 'mp3', 'wav', 'm4a', 'aac'}:
+        ext = 'webm'
+    voice_dir = os.path.join(os.path.dirname(__file__), 'uploads', 'voice')
+    os.makedirs(voice_dir, exist_ok=True)
+    fname = f'{_uid()}_{uuid.uuid4().hex[:12]}.{ext}'
+    fpath = os.path.join(voice_dir, fname)
+    audio.save(fpath)
+    media_url = f'/uploads/voice/{fname}'
+    msg_id = send_message(_uid(), receiver_id, '[语音消息]', msg_type='voice', media_url=media_url)
+    sender = get_user_by_id(_uid())
+    if sender:
+        create_notification(
+            receiver_id,
+            'message',
+            f'{sender["username"]} 发来语音',
+            '[语音消息]',
+            f'/chat?id={_uid()}&user={sender["username"]}',
+        )
+    return jsonify({'success': True, 'message_id': msg_id, 'media_url': media_url})
+
+
+@app.route('/api/colleagues')
+def api_colleagues():
+    """同公司同事（自动好友），可直接聊天"""
+    from modules.database import list_company_colleagues
+    return jsonify({'success': True, 'colleagues': list_company_colleagues(_uid())})
+
+
+@app.route('/uploads/voice/<path:filename>')
+def serve_voice_file(filename):
+    voice_dir = os.path.join(os.path.dirname(__file__), 'uploads', 'voice')
+    return send_from_directory(voice_dir, filename)
 
 @app.route('/api/messages/with/<int:user_id>')
 def api_get_messages(user_id):
@@ -1843,6 +2248,19 @@ def api_export_html():
         )
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    uid = _uid()
+    if uid:
+        try:
+            from modules.enterprise_db import save_doc_version
+            save_doc_version(
+                uid, 'report', hash(timestamp) % 100000,
+                {'summary': summary, 'score': score, 'format': 'html',
+                 'audit_count': len(_analysis_cache.get('audit_results', []))},
+                message=f'导出 HTML 报告 {timestamp}',
+                author_id=uid,
+            )
+        except Exception:
+            pass
     return send_file(
         io.BytesIO(html.encode('utf-8')),
         mimetype='text/html',
@@ -1940,250 +2358,180 @@ def api_voice_recognize():
 
 
 # ============================================================
-# API - 财务核算 (from Yhm444)
-# ============================================================
-
-@app.route('/api/finance/overview')
-def api_finance_overview():
-    from modules.finance import overview, accounts, vouchers
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    data = overview(uid)
-    return jsonify({'success': True, **data, 'accounts': accounts(uid), 'recent_vouchers': vouchers(uid, limit=8)})
-
-@app.route('/api/finance/accounts')
-def api_finance_accounts():
-    from modules.finance import accounts
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    return jsonify({'success': True, 'accounts': accounts(uid)})
-
-@app.route('/api/finance/vouchers', methods=['GET', 'POST'])
-def api_finance_vouchers():
-    from modules.finance import vouchers, create_voucher
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    if request.method == 'GET':
-        status = request.args.get('status')
-        limit = request.args.get('limit', 50, type=int)
-        return jsonify({'success': True, 'vouchers': vouchers(uid, limit=limit, status=status)})
-    data = request.get_json(silent=True) or {}
-    return jsonify(create_voucher(uid, data))
-
-@app.route('/api/finance/vouchers/<int:voucher_id>/post', methods=['POST'])
-def api_finance_post_voucher(voucher_id):
-    from modules.finance import approve_voucher
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    return jsonify(approve_voucher(uid, voucher_id))
-
-@app.route('/api/finance/vouchers/<int:voucher_id>/submit-approval', methods=['POST'])
-def api_finance_submit_approval(voucher_id):
-    from modules.finance import submit_voucher_approval
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    data = request.get_json(silent=True) or {}
-    return jsonify(submit_voucher_approval(uid, voucher_id, data.get('approver_id')))
-
-@app.route('/api/finance/vouchers/<int:voucher_id>/versions')
-def api_voucher_versions(voucher_id):
-    from modules.enterprise_db import list_doc_versions
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    return jsonify({'success': True, 'versions': list_doc_versions(uid, 'voucher', voucher_id)})
-
-@app.route('/api/finance/vouchers/<int:voucher_id>/versions/<int:version_no>')
-def api_voucher_version(voucher_id, version_no):
-    from modules.enterprise_db import get_doc_version
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    v = get_doc_version(uid, 'voucher', voucher_id, version_no)
-    if not v: return jsonify({'success': False, 'error': '版本不存在'})
-    return jsonify({'success': True, 'version': v})
-
-@app.route('/api/finance/partners', methods=['GET', 'POST'])
-def api_finance_partners():
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    if request.method == 'POST':
-        from modules.enterprise_db import create_partner
-        data = request.get_json(silent=True) or {}
-        return jsonify({'success': True, 'partner_id': create_partner(uid, data)})
-    from modules.enterprise_db import list_partners
-    return jsonify({'success': True, 'partners': list_partners(uid, request.args.get('type'))})
-
-@app.route('/api/finance/invoices', methods=['GET', 'POST'])
-def api_finance_invoices():
-    from modules.enterprise_db import list_invoices, create_invoice, save_doc_version
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    if request.method == 'GET':
-        return jsonify({'success': True, 'invoices': list_invoices(uid, request.args.get('type'))})
-    data = request.get_json(silent=True) or {}
-    iid = create_invoice(uid, data)
-    invs = list_invoices(uid)
-    inv = next((x for x in invs if x['id'] == iid), None)
-    if inv: save_doc_version(uid, 'invoice', iid, inv, message='开具发票', author_id=uid)
-    return jsonify({'success': True, 'invoice_id': iid})
-
-@app.route('/api/finance/invoices/<int:invoice_id>/pay', methods=['POST'])
-def api_finance_invoice_pay(invoice_id):
-    from modules.enterprise_db import record_invoice_payment
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    data = request.get_json(silent=True) or {}
-    record_invoice_payment(uid, invoice_id, float(data.get('amount', 0)))
-    return jsonify({'success': True})
-
-@app.route('/api/finance/bank/accounts')
-def api_finance_bank_accounts():
-    from modules.enterprise_db import list_bank_accounts
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    return jsonify({'success': True, 'accounts': list_bank_accounts(uid)})
-
-@app.route('/api/finance/bank/<int:bank_id>/txns')
-def api_finance_bank_txns(bank_id):
-    from modules.enterprise_db import list_bank_txns
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    return jsonify({'success': True, 'txns': list_bank_txns(bank_id, uid)})
-
-@app.route('/api/finance/bank/<int:bank_id>/import', methods=['POST'])
-def api_finance_bank_import(bank_id):
-    from modules.enterprise_db import import_bank_txns
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    data = request.get_json(silent=True) or {}
-    count = import_bank_txns(uid, bank_id, data.get('txns') or [])
-    return jsonify({'success': True, 'imported': count})
-
-@app.route('/api/finance/bank/<int:bank_id>/reconcile', methods=['POST'])
-def api_finance_bank_reconcile(bank_id):
-    from modules.enterprise_db import run_reconciliation
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    return jsonify({'success': True, **run_reconciliation(uid, bank_id)})
-
-@app.route('/api/workflow/approvals')
-def api_workflow_approvals():
-    from modules.enterprise_db import list_approvals
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    return jsonify({'success': True, 'approvals': list_approvals(uid, request.args.get('scope', 'mine'))})
-
-@app.route('/api/workflow/approvals/<int:approval_id>/<action>', methods=['POST'])
-def api_workflow_approval_act(approval_id, action):
-    from modules.enterprise_db import act_approval
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    if action not in ('approved', 'rejected'): return jsonify({'success': False, 'error': '无效操作'})
-    data = request.get_json(silent=True) or {}
-    return jsonify(act_approval(uid, approval_id, action, data.get('comment', '')))
-
-@app.route('/api/workflow/tasks', methods=['GET', 'POST'])
-def api_workflow_tasks():
-    from modules.enterprise_db import list_tasks, create_task
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    if request.method == 'POST':
-        data = request.get_json(silent=True) or {}
-        tid = create_task(uid, data)
-        return jsonify({'success': True, 'task_id': tid})
-    return jsonify({'success': True, 'tasks': list_tasks(uid, request.args.get('scope', 'assigned'))})
-
-@app.route('/api/workflow/tasks/<int:task_id>/status', methods=['POST'])
-def api_workflow_task_status(task_id):
-    from modules.enterprise_db import update_task_status
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    data = request.get_json(silent=True) or {}
-    update_task_status(uid, task_id, data.get('status', 'done'))
-    return jsonify({'success': True})
-
-@app.route('/api/workflow/tasks/<int:task_id>/comments', methods=['GET', 'POST'])
-def api_workflow_task_comments(task_id):
-    from modules.enterprise_db import add_task_comment, list_task_comments
-    uid = _uid()
-    if not uid: return jsonify({'success': False, 'error': '请先登录'})
-    if request.method == 'POST':
-        data = request.get_json(silent=True) or {}
-        cid = add_task_comment(uid, task_id, data.get('content', ''))
-        return jsonify({'success': True, 'comment_id': cid})
-    return jsonify({'success': True, 'comments': list_task_comments(task_id)})
-
-
-# ============================================================
 # API - AI 助手
 # ============================================================
 
 @app.route('/api/ai/status')
 def api_ai_status():
-    from modules.local_llm import model_status
     from modules.ai.model_router import list_models, get_default_model_id
+    models = list_models()
+    available = [m for m in models if m.get('available')]
     return jsonify({
         'success': True,
-        **model_status(),
+        'mode': 'api',
+        'loaded': bool(available),
+        'ready': bool(available),
         'default_model': get_default_model_id(),
-        'models': list_models(),
+        'models': models,
+        'message': '请配置 BAILIAN_API_KEY 等环境变量，或在「模型管理」中填写 API Key' if not available else 'API 模型可用',
     })
 
 
 @app.route('/api/ai/chat', methods=['POST'])
 def api_ai_chat():
     global _ai_conversations
-    from modules.ai.model_router import chat as router_chat, get_default_model_id
-
-    data = request.get_json() or {}
-    user_message = data.get('message', '').strip()
-    model_id = (data.get('model') or '').strip() or get_default_model_id()
+    data = request.get_json(silent=True) or {}
+    user_message = (data.get('message') or '').strip()
+    use_agent = bool(data.get('use_agent', False))
+    model_id = (data.get('model') or '').strip()
 
     if not user_message:
         return jsonify({'success': False, 'error': '请输入问题'})
 
     uid = _uid() or 0
-    context = _build_ai_context()
-
     if uid not in _ai_conversations:
         _ai_conversations[uid] = []
     conversation = _ai_conversations[uid]
 
+    from modules.ai.inference_policy import (
+        LatencyTracker, get_generation_params, try_fast_bypass, rule_based_fallback,
+    )
+    from modules.ai.model_router import chat as router_chat, get_default_model_id, list_models
+
+    gen = get_generation_params(user_message)
+    tracker = LatencyTracker(gen['intent'])
+
     try:
+        bypass = try_fast_bypass(user_message, uid if uid else None)
+        if bypass:
+            latency_ms = tracker.finish(positive=True)
+            reply = bypass['reply']
+            conversation.append({'role': 'user', 'content': user_message})
+            conversation.append({'role': 'assistant', 'content': reply})
+            if len(conversation) > 40:
+                _ai_conversations[uid] = conversation[-40:]
+            return jsonify({
+                'success': True,
+                'reply': reply,
+                'model': bypass.get('model', 'policy:bypass'),
+                'steps': [],
+                'actions': bypass.get('actions', []),
+                'bypassed': True,
+                'intent': bypass.get('intent'),
+                'latency_ms': round(latency_ms, 1),
+            })
+
+        if not model_id:
+            model_id = get_default_model_id()
+
+        available = any(m.get('available') for m in list_models())
+        if not available:
+            reply = rule_based_fallback(user_message, uid if uid else None)
+            reply += '\n\n（尚未配置可用的云端 API Key，请到「模型管理」填写 BAILIAN_API_KEY / DEEPSEEK_API_KEY。）'
+            latency_ms = tracker.finish(positive=True)
+            conversation.append({'role': 'user', 'content': user_message})
+            conversation.append({'role': 'assistant', 'content': reply})
+            if len(conversation) > 40:
+                _ai_conversations[uid] = conversation[-40:]
+            return jsonify({
+                'success': True,
+                'reply': reply,
+                'model': 'policy:fallback',
+                'intent': gen['intent'],
+                'latency_ms': round(latency_ms, 1),
+            })
+
+        if use_agent:
+            from modules.ai.agent_engine import run_agent
+            try:
+                result = run_agent(
+                    user_message,
+                    model_id=model_id,
+                    history=conversation,
+                    context={'user_id': uid},
+                    max_steps=3,
+                    system_prompt=(
+                        '你是智能财务系统 AI 助手，可帮助用户查账、审计、协作与跳转页面。'
+                        '需要打开功能页时调用 navigate_page。回答简洁专业。'
+                    ),
+                )
+            except Exception:
+                result = {
+                    'reply': rule_based_fallback(user_message, uid if uid else None),
+                    'steps': [], 'model': 'policy:fallback', 'actions': [],
+                }
+            latency_ms = tracker.finish()
+            reply = result['reply']
+            conversation.append({'role': 'user', 'content': user_message})
+            conversation.append({'role': 'assistant', 'content': reply})
+            if len(conversation) > 40:
+                _ai_conversations[uid] = conversation[-40:]
+            return jsonify({
+                'success': True,
+                'reply': reply,
+                'model': result.get('model', model_id),
+                'steps': result.get('steps', []),
+                'actions': result.get('actions', []),
+                'intent': gen['intent'],
+                'latency_ms': round(latency_ms, 1),
+            })
+
+        context = _build_ai_context()
         system_prompt = (
-            '你是财务审计AI助手，帮助用户理解财务审计数据和发现。'
-            '基于提供的审计数据上下文回答用户问题。'
-            '用中文回答，简洁专业。'
-            '\n\n当前审计上下文:\n' + context
+            '你是财务智能助手。基于审计上下文简洁回答。'
+            '\n\n当前上下文:\n' + context[:1500]
         )
         messages = [{'role': 'system', 'content': system_prompt}]
-        messages.extend(conversation[-20:])
+        messages.extend(conversation[-8:])
         messages.append({'role': 'user', 'content': user_message})
-
-        reply = router_chat(messages, model_id=model_id, max_tokens=1024, temperature=0.7)
-
+        try:
+            reply = router_chat(
+                messages,
+                model_id=model_id,
+                max_tokens=int(gen.get('max_tokens', 384)),
+                temperature=float(gen.get('temperature', 0.3)),
+            )
+        except Exception as api_err:
+            reply = rule_based_fallback(user_message, uid if uid else None)
+            reply += f'\n\n（API 调用失败: {api_err}）'
+        latency_ms = tracker.finish()
         conversation.append({'role': 'user', 'content': user_message})
         conversation.append({'role': 'assistant', 'content': reply})
         if len(conversation) > 40:
             _ai_conversations[uid] = conversation[-40:]
-
-        return jsonify({'success': True, 'reply': reply, 'model': model_id})
+        return jsonify({
+            'success': True,
+            'reply': reply,
+            'model': model_id,
+            'intent': gen['intent'],
+            'latency_ms': round(latency_ms, 1),
+        })
 
     except Exception as e:
+        tracker.finish(positive=False)
         return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/ai/rate', methods=['POST'])
+def api_ai_rate():
+    """AI 回复反馈 — 用于在线策略强化学习调参。"""
+    from modules.ai.inference_policy import record_outcome
+    data = request.get_json(silent=True) or {}
+    intent = (data.get('intent') or 'simple_qa').strip()
+    rating = data.get('rating')
+    latency_ms = float(data.get('latency_ms') or 0)
+    if rating is not None:
+        record_outcome(intent, latency_ms=latency_ms, rating=int(rating))
+    else:
+        record_outcome(intent, latency_ms=latency_ms, positive=bool(data.get('positive', True)))
+    return jsonify({'success': True})
 
 
 @app.route('/api/ai/vision', methods=['POST'])
 def api_ai_vision():
-    """图片表格识别：OCR + 本地 Qwen 模型结构化"""
-    from modules.local_llm import is_model_ready, get_model_path, vision_table_from_ocr
+    """图片表格识别：OCR（本地权重已停用；复杂图请用 Agent + qwen-vl-plus）。"""
     from modules.data_processor import _ocr_image
     import tempfile
-
-    if not is_model_ready():
-        return jsonify({
-            'success': False,
-            'error': f'本地模型未下载，请运行: python scripts/download_qwen_model.py（目录: {get_model_path()}）',
-        })
 
     if 'image' not in request.files:
         return jsonify({'success': False, 'error': '未上传图片'})
@@ -2199,14 +2547,14 @@ def api_ai_vision():
         os.unlink(tmp_path)
 
         if not ocr_rows:
-            return jsonify({'success': False, 'error': 'OCR 未能识别出表格内容，请换一张更清晰的图片'})
+            return jsonify({
+                'success': False,
+                'error': 'OCR 未能识别出表格。复杂图片请在 Agent 中选用 bailian:qwen-vl-plus。',
+            })
 
-        ocr_text = '\n'.join(['\t'.join(str(c) for c in row) for row in ocr_rows])
-        table_data = vision_table_from_ocr(ocr_text)
-        return jsonify({'success': True, 'table': table_data, 'model': AI_MODEL})
-
-    except json.JSONDecodeError:
-        return jsonify({'success': False, 'error': '模型输出格式错误，请重试或换一张图片'})
+        headers = [str(c) for c in ocr_rows[0]]
+        rows = [[str(c) for c in row] for row in ocr_rows[1:]] if len(ocr_rows) > 1 else []
+        return jsonify({'success': True, 'table': {'columns': headers, 'data': rows}, 'model': 'ocr'})
     except Exception as e:
         return jsonify({'success': False, 'error': f'图片识别失败: {str(e)}'})
 
@@ -2223,39 +2571,6 @@ def api_agent_models():
         'default': get_default_model_id(),
         'models': list_models(),
     })
-
-
-# ── Bot 编排 ──
-@app.route('/api/agent/bots')
-def api_agent_bots():
-    from modules.ai.bot_engine import list_bots
-    return jsonify({'success': True, 'bots': list_bots()})
-
-@app.route('/api/agent/bots/<bot_id>/run', methods=['POST'])
-def api_agent_run_bot(bot_id):
-    from modules.ai.bot_engine import run_bot
-    data = request.get_json(silent=True) or {}
-    try:
-        result = run_bot(bot_id, user_message=data.get('message',''), model_id=data.get('model'), context={'user_id': _uid()})
-        return jsonify({'success': True, **result})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
-
-# ── AI 评分 ──
-@app.route('/api/ai/rate', methods=['POST'])
-def api_ai_rate():
-    data = request.get_json(silent=True) or {}
-    from modules.database import save_feedback
-    save_feedback(_uid(), data.get('page','agent'), data.get('rating',0), data.get('message','AI回答评分'))
-    return jsonify({'success': True})
-
-# ── 协作单元格编辑 ──
-@app.route('/api/collab/<token>/editing', methods=['POST'])
-def api_collab_editing(token):
-    from modules.collab import set_collab_editing_cell
-    data = request.get_json(silent=True) or {}
-    set_collab_editing_cell(token, _uid() or 0, data.get('row'), data.get('column'))
-    return jsonify({'success': True})
 
 
 @app.route('/api/agent/extensions')
@@ -2276,9 +2591,31 @@ def api_agent_reload():
     return jsonify({'success': True, 'counts': counts})
 
 
+@app.route('/api/agent/bots')
+def api_agent_bots():
+    from modules.ai.bot_engine import list_bots
+    return jsonify({'success': True, 'bots': list_bots()})
+
+
+@app.route('/api/agent/bots/<bot_id>/run', methods=['POST'])
+def api_agent_bot_run(bot_id):
+    from modules.ai.bot_engine import run_bot
+    data = request.get_json(silent=True) or {}
+    message = (data.get('message') or '').strip()
+    if not message:
+        return jsonify({'success': False, 'error': '请输入消息'})
+    uid = _uid() or 0
+    try:
+        result = run_bot(bot_id, message, model_id=data.get('model'), context={'user_id': uid})
+        return jsonify({'success': True, **result, 'actions': result.get('actions', [])})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
 @app.route('/api/agent/chat', methods=['POST'])
 def api_agent_chat():
     from modules.ai.agent_engine import run_agent
+    from modules.ai.bot_engine import run_bot
     from modules.ai.registry import get_extension
     from modules.database import (
         create_agent_conversation, get_agent_conversation,
@@ -2289,10 +2626,11 @@ def api_agent_chat():
     message = (data.get('message') or '').strip()
     model_id = (data.get('model') or '').strip() or None
     agent_id = (data.get('agent_id') or 'office_assistant').strip()
+    bot_id = (data.get('bot_id') or '').strip()
     use_tools = data.get('use_tools', True)
     permission_mode = data.get('permission_mode', 'ask')
     run_mode = data.get('run_mode', 'single')
-    conv_id = data.get('conversation_id')  # None = 自动新建
+    conv_id = data.get('conversation_id')
     session_id = f'agent_{_uid() or 0}'
 
     if not message:
@@ -2300,7 +2638,6 @@ def api_agent_chat():
 
     uid = _uid() or 0
 
-    # ── 会话管理（带 SQLite 持久化）──
     if conv_id:
         conv = get_agent_conversation(int(conv_id), uid)
         if not conv:
@@ -2321,21 +2658,25 @@ def api_agent_chat():
     auto_info = {}
 
     try:
-        # ── Auto ──
-        if run_mode == 'auto':
+        if bot_id:
+            result = run_bot(bot_id, message, model_id=model_id, context=context, history=history)
+        elif run_mode == 'auto':
             from modules.ai.commander import classify_task
             auto_info = classify_task(message)
             model_id = auto_info['model']
-
-        # ── Multi-Agent ──
-        if run_mode == 'multi':
+            result = run_agent(
+                message, model_id=model_id, history=history, context=context,
+                system_prompt=system_prompt, permission_mode=permission_mode,
+                session_id=session_id,
+            )
+        elif run_mode == 'multi':
             from modules.ai.commander import run_commander
             from modules.ai.model_router import list_models as list_all_models
             all_models = list_all_models()
             available = [m['id'] for m in all_models if m.get('available') and not m.get('auto_discovered')]
             result = run_commander(
                 message,
-                available_models=available[:6] if available else [model_id or 'bailian:qwen-plus', 'bailian:qwen-turbo'],
+                available_models=available[:6] if available else [model_id or 'bailian:qwen-plus'],
                 model_id=model_id or (available[0] if available else None),
                 context=context, history=history,
                 permission_mode=permission_mode, session_id=session_id,
@@ -2356,13 +2697,12 @@ def api_agent_chat():
             reply = router_chat(messages, model_id=model_id)
             result = {'reply': reply, 'steps': [], 'model': model_id, 'finished': True}
 
-        # 持久化消息
         reply_text = _safe_reply(result)
         history.append({'role': 'user', 'content': message})
         history.append({'role': 'assistant', 'content': reply_text})
         save_agent_messages(conv_id, uid, history)
 
-        resp = {'success': True, **result, 'run_mode': run_mode, 'conversation_id': conv_id}
+        resp = {'success': True, **result, 'run_mode': run_mode, 'conversation_id': conv_id, 'actions': result.get('actions', [])}
         if run_mode == 'auto' and auto_info:
             resp['auto_model'] = auto_info.get('model')
             resp['auto_reason'] = auto_info.get('reason', '自动选择')
@@ -2374,11 +2714,57 @@ def api_agent_chat():
         return jsonify({'success': False, 'error': str(e)})
 
 
-# ── 会话管理 API ──
+@app.route('/api/agent/upload', methods=['POST'])
+def api_agent_upload():
+    """Agent 聊天中上传文件（CSV/Excel/图片）。"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': '未选择文件'})
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'success': False, 'error': '文件名为空'})
+
+    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
+    uid = _uid() or 0
+
+    if ext in ('png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'):
+        try:
+            result = process_image_upload(file)
+            if result.get('success'):
+                result = _run_analysis_after_upload(result, source_type='image')
+                reply = (
+                    f'✅ 已识别图片中的表格数据！\n\n'
+                    f'📊 共 {result.get("row_count", 0)} 行\n'
+                    f'📋 风险评分: {result.get("score", {}).get("risk_percentage", 0)}%\n\n'
+                    f'可以说「帮我分析这些数据」查看详细结果。'
+                )
+                return jsonify({'success': True, 'reply': reply, 'upload_result': result, 'file_type': 'image'})
+            return jsonify({'success': False, 'error': result.get('error', 'OCR识别失败')})
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'图片处理失败: {str(e)}'})
+
+    if ext in ('csv', 'xls', 'xlsx'):
+        try:
+            result = process_upload(file)
+            if result.get('success'):
+                result = _run_analysis_after_upload(result, source_type='file')
+                audit_summary = result.get('audit_summary', {})
+                score = result.get('score', {})
+                reply = (
+                    f'✅ 文件 "{file.filename}" 已上传并完成审计分析！\n\n'
+                    f'📊 数据规模: {result.get("row_count", 0)} 行\n'
+                    f'⚠️ 风险: {score.get("overall_label", "未知")} ({score.get("risk_percentage", 0)}%)\n'
+                    f'🔍 发现: 高风险 {audit_summary.get("high_risk", 0)} 项, 中风险 {audit_summary.get("medium_risk", 0)} 项'
+                )
+                return jsonify({'success': True, 'reply': reply, 'upload_result': result, 'file_type': 'file'})
+            return jsonify({'success': False, 'error': result.get('error', '上传失败')})
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'文件处理失败: {str(e)}'})
+
+    return jsonify({'success': False, 'error': f'不支持的文件格式: .{ext}'})
+
 
 @app.route('/api/agent/conversations', methods=['GET'])
 def api_agent_list_conversations():
-    """列出当前用户的所有 Agent 会话。"""
     from modules.database import list_agent_conversations
     uid = _uid()
     if not uid:
@@ -2388,7 +2774,6 @@ def api_agent_list_conversations():
 
 @app.route('/api/agent/conversations', methods=['POST'])
 def api_agent_create_conversation():
-    """新建 Agent 会话。"""
     from modules.database import create_agent_conversation
     uid = _uid()
     if not uid:
@@ -2400,7 +2785,6 @@ def api_agent_create_conversation():
 
 @app.route('/api/agent/conversations/<int:conv_id>', methods=['GET'])
 def api_agent_get_conversation(conv_id):
-    """获取单个会话的消息历史。"""
     from modules.database import get_agent_conversation
     uid = _uid()
     if not uid:
@@ -2413,7 +2797,6 @@ def api_agent_get_conversation(conv_id):
 
 @app.route('/api/agent/conversations/<int:conv_id>', methods=['DELETE'])
 def api_agent_delete_conversation(conv_id):
-    """删除 Agent 会话。"""
     from modules.database import delete_agent_conversation
     uid = _uid()
     if not uid:
@@ -2422,101 +2805,8 @@ def api_agent_delete_conversation(conv_id):
     return jsonify({'success': ok, 'error': None if ok else '会话不存在'})
 
 
-@app.route('/api/agent/upload', methods=['POST'])
-def api_agent_upload():
-    """Agent 聊天中上传文件（CSV/Excel/图片），自动触发审计分析。"""
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'error': '未选择文件'})
-
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'success': False, 'error': '文件名为空'})
-
-    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
-    from modules.database import create_agent_conversation, save_agent_messages, auto_title_from_message
-
-    uid = _uid() or 0
-    context = {'user_id': uid}
-
-    # 图片 → OCR
-    if ext in ('png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'):
-        try:
-            from modules.data_processor import process_image_upload
-            result = process_image_upload(file)
-            if result.get('success'):
-                result = _run_analysis_after_upload(result, source_type='image')
-                reply = f'✅ 已识别图片中的表格数据！\n\n📊 共 {result.get("row_count", 0)} 行, {result.get("col_count", 0)} 列\n📋 风险评分: {result.get("score", {}).get("risk_percentage", 0)}%\n\n你可以对我说"帮我分析这些数据"来查看详细审计结果。'
-                _save_agent_file_history(uid, file.filename, reply, 'image')
-                return jsonify({
-                    'success': True, 'reply': reply,
-                    'upload_result': result, 'file_type': 'image',
-                })
-            return jsonify({'success': False, 'error': result.get('error', 'OCR识别失败')})
-        except Exception as e:
-            return jsonify({'success': False, 'error': f'图片处理失败: {str(e)}'})
-
-    # CSV/Excel → 直接上传并自动审计
-    if ext in ('csv', 'xls', 'xlsx'):
-        try:
-            from modules.data_processor import process_upload
-            result = process_upload(file)
-            if result.get('success'):
-                result = _run_analysis_after_upload(result, source_type='file')
-                audit_summary = result.get('audit_summary', {})
-                score = result.get('score', {})
-                reply = (
-                    f'✅ 文件 "{file.filename}" 已上传并完成审计分析！\n\n'
-                    f'📊 数据规模: {result.get("row_count", 0)} 行\n'
-                    f'⚠️ 风险: {score.get("overall_label", "未知")} ({score.get("risk_percentage", 0)}%)\n'
-                    f'🔍 发现: 高风险 {audit_summary.get("high_risk", 0)} 项, 中风险 {audit_summary.get("medium_risk", 0)} 项\n\n'
-                    f'你可以说"查看仪表盘"、"分析高风险项"、"导出报告"等。'
-                )
-                _save_agent_file_history(uid, file.filename, reply, 'file')
-                return jsonify({
-                    'success': True, 'reply': reply,
-                    'upload_result': result, 'file_type': 'file',
-                })
-            return jsonify({'success': False, 'error': result.get('error', '上传失败')})
-        except Exception as e:
-            return jsonify({'success': False, 'error': f'文件处理失败: {str(e)}'})
-
-    return jsonify({'success': False, 'error': f'不支持的文件格式: .{ext}（支持 csv/xls/xlsx/png/jpg）'})
-
-
-def _save_agent_file_history(user_id: int, filename: str, reply: str, file_type: str):
-    """文件上传后保存到会话历史。"""
-    from modules.database import (
-        create_agent_conversation, list_agent_conversations,
-        get_agent_conversation, save_agent_messages,
-    )
-    convs = list_agent_conversations(user_id)
-    if convs:
-        conv = get_agent_conversation(convs[0]['id'], user_id)
-        if conv:
-            history = conv.get('messages', [])
-        else:
-            history = []
-        conv_id = convs[0]['id']
-    else:
-        conv = create_agent_conversation(user_id, title=f'上传{file_type}: {filename[:20]}')
-        conv_id = conv['id']
-        history = []
-    history.append({'role': 'user', 'content': f'[上传文件: {filename}]'})
-    history.append({'role': 'assistant', 'content': reply})
-    save_agent_messages(conv_id, user_id, history)
-
-
-@app.route('/api/agent/clear', methods=['POST'])
-def api_agent_clear():
-    uid = _uid()
-    if uid and uid in _agent_conversations:
-        del _agent_conversations[uid]
-    return jsonify({'success': True})
-
-
 @app.route('/api/agent/permission/allow', methods=['POST'])
 def api_agent_permission_allow():
-    """将工具添加到会话的始终允许列表。"""
     from modules.ai.permission import add_always_allow
     data = request.get_json() or {}
     tool_name = data.get('tool_name', '')
@@ -2527,11 +2817,8 @@ def api_agent_permission_allow():
     return jsonify({'success': True, 'tool_name': tool_name, 'remember': remember})
 
 
-# ── 模型管理 ──
-
 @app.route('/api/agent/models/scan', methods=['GET'])
 def api_agent_scan_models():
-    """扫描本地可用的 AI 端点。"""
     from modules.ai.model_router import scan_local_endpoints
     discovered = scan_local_endpoints()
     return jsonify({'success': True, 'discovered': discovered, 'count': len(discovered)})
@@ -2539,16 +2826,14 @@ def api_agent_scan_models():
 
 @app.route('/api/agent/models/config', methods=['POST'])
 def api_agent_add_model():
-    """添加新模型到配置。"""
     from modules.ai.model_router import add_model
     data = request.get_json() or {}
     result = add_model(data)
     return jsonify(result)
 
 
-@app.route('/api/agent/models/<model_id>', methods=['DELETE'])
+@app.route('/api/agent/models/<path:model_id>', methods=['DELETE'])
 def api_agent_delete_model(model_id):
-    """删除模型配置。"""
     from modules.ai.model_router import delete_model
     result = delete_model(model_id)
     return jsonify(result)
@@ -2556,108 +2841,13 @@ def api_agent_delete_model(model_id):
 
 @app.route('/api/agent/models/apikey', methods=['POST'])
 def api_agent_set_apikey():
-    """设置模型的 API Key。"""
     from modules.ai.model_router import update_api_key
     data = request.get_json() or {}
     result = update_api_key(data.get('model_id', ''), data.get('api_key', ''))
     return jsonify(result)
 
 
-@app.route('/api/agent/models/upload', methods=['POST'])
-def api_agent_upload_model():
-    """上传 AI 模型文件（GGUF/ONNX）到 data/models/。"""
-    if 'file' not in request.files:
-        return jsonify({'success': False, 'error': '未选择文件'})
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'success': False, 'error': '文件名为空'})
-    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
-    if ext not in ('gguf', 'onnx', 'bin', 'pt', 'safetensors', 'pth'):
-        return jsonify({'success': False, 'error': f'不支持的模型格式: {ext}'})
-    import os as _os
-    dest_dir = _os.path.join(_os.path.dirname(__file__), 'data', 'models')
-    _os.makedirs(dest_dir, exist_ok=True)
-    dest_path = _os.path.join(dest_dir, file.filename)
-    file.save(dest_path)
-    return jsonify({'success': True, 'filename': file.filename, 'path': f'data/models/{file.filename}', 'size': _os.path.getsize(dest_path)})
-
-
-# ── 飞书 Bot ──
-
-@app.route('/api/feishu/config', methods=['GET'])
-def api_feishu_get_config():
-    from modules.feishu_bot import get_config
-    return jsonify({'success': True, 'config': get_config()})
-
-
-@app.route('/api/feishu/config', methods=['POST'])
-def api_feishu_save_config():
-    from modules.feishu_bot import save_config, get_config
-    data = request.get_json() or {}
-    save_config(data)
-    return jsonify({'success': True, 'config': get_config()})
-
-
-@app.route('/api/feishu/status', methods=['GET'])
-def api_feishu_status():
-    from modules.feishu_bot import get_configured_status
-    return jsonify({'success': True, **get_configured_status()})
-
-
-@app.route('/api/feishu/webhook', methods=['POST'])
-def api_feishu_webhook():
-    """接收飞书事件回调。"""
-    from modules.feishu_bot import process_message, verify_signature
-    body = request.get_data(as_text=True)
-    timestamp = request.headers.get('X-Lark-Request-Timestamp', '')
-    nonce = request.headers.get('X-Lark-Request-Nonce', '')
-    signature = request.headers.get('X-Lark-Signature', '')
-
-    # 签名验证（开发模式下宽松处理）
-    if signature and timestamp and nonce:
-        if not verify_signature(timestamp, nonce, body, signature):
-            return jsonify({'code': 19001, 'msg': '签名验证失败'})
-
-    data = request.get_json() or {}
-    # 飞书 URL 验证
-    if data.get('type') == 'url_verification':
-        return jsonify({'challenge': data.get('challenge', '')})
-
-    # 处理消息事件
-    event = data.get('event', {})
-    msg_type = event.get('msg_type', '')
-
-    if msg_type == 'text':
-        result = process_message(event)
-        if result.get('success'):
-            from modules.feishu_bot import send_text_message
-            send_text_message(event.get('open_id', ''), result.get('reply', ''))
-        return jsonify({'code': 0, 'msg': 'ok'})
-
-    return jsonify({'code': 0, 'msg': 'ok'})
-
-
-@app.route('/api/feishu/send', methods=['POST'])
-def api_feishu_send():
-    """主动发送飞书消息。"""
-    from modules.feishu_bot import send_text_message, send_card_message
-    data = request.get_json() or {}
-    msg_type = data.get('msg_type', 'text')
-    open_id = data.get('open_id', '')
-    content = data.get('content', '')
-    if not open_id:
-        return jsonify({'success': False, 'error': '缺少 open_id'})
-
-    if msg_type == 'card':
-        result = send_card_message(open_id, content)
-    else:
-        result = send_text_message(open_id, content)
-    return jsonify(result)
-
-
-# ── 工作流模板 ──
-
-@app.route('/api/agent/workflows', methods=['GET'])
+@app.route('/api/agent/workflows')
 def api_agent_workflows():
     from modules.ai.workflow_engine import list_workflows
     return jsonify({'success': True, 'workflows': list_workflows()})
@@ -2666,6 +2856,7 @@ def api_agent_workflows():
 @app.route('/api/agent/workflows/<workflow_id>/run', methods=['POST'])
 def api_agent_run_workflow(workflow_id):
     from modules.ai.workflow_engine import run_workflow
+
     data = request.get_json(silent=True) or {}
     try:
         result = run_workflow(
@@ -2677,6 +2868,14 @@ def api_agent_run_workflow(workflow_id):
         return jsonify({'success': result.get('success', True), **result})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/agent/clear', methods=['POST'])
+def api_agent_clear():
+    uid = _uid()
+    if uid and uid in _agent_conversations:
+        del _agent_conversations[uid]
+    return jsonify({'success': True})
 
 
 # ============================================================

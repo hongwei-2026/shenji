@@ -17,6 +17,12 @@ from modules.ai.registry import list_tools, run_tool
 from modules.ai.permission import check_permission, PermissionResult
 
 
+def _collect_action(result: Any, actions: list[dict]) -> None:
+    if isinstance(result, dict) and result.get('action') == 'navigate':
+        if not any(a.get('url') == result.get('url') for a in actions):
+            actions.append(result)
+
+
 def _tools_prompt(tools: list[dict]) -> str:
     lines = ['可用工具（你可以调用这些工具来操作审计系统）:']
     for t in tools:
@@ -30,7 +36,7 @@ def _tools_prompt(tools: list[dict]) -> str:
     lines.append('')
     lines.append('重要提醒：')
     lines.append('- 你已深度绑定审计系统，可以操作数据上传、表格编辑、审计分析、报告导出、用户协同等全部功能')
-    lines.append('- 可以引导用户前往不同页面：使用 navigate_to 工具')
+    lines.append('- 可以引导用户前往不同页面：使用 navigate_page / navigate_to 工具')
     lines.append('- 每次工具调用后，分析返回结果再决定下一步')
     return '\n'.join(lines)
 
@@ -121,6 +127,7 @@ def run_agent(
     mid = model_id or get_default_model_id()
     tools = list_tools()
     trace: list[dict] = []
+    actions: list[dict] = []
     permission_requests: list[dict] = []
 
     # 构建系统提示词
@@ -145,10 +152,10 @@ def run_agent(
         action = _parse_action(reply)
 
         if not action:
-            return {'reply': reply, 'steps': trace, 'model': mid, 'finished': True, 'permission_requests': permission_requests}
+            return {'reply': reply, 'steps': trace, 'actions': actions, 'model': mid, 'finished': True, 'permission_requests': permission_requests}
 
         if action.get('action') == 'answer':
-            return {'reply': action.get('content', reply), 'steps': trace, 'model': mid, 'finished': True, 'permission_requests': permission_requests}
+            return {'reply': action.get('content', reply), 'steps': trace, 'actions': actions, 'model': mid, 'finished': True, 'permission_requests': permission_requests}
 
         if action.get('action') == 'tool':
             tool_name = action.get('tool', '')
@@ -218,6 +225,7 @@ def run_agent(
                     pass
 
                 tool_duration_ms = int((datetime.now() - tool_start).total_seconds() * 1000)
+                _collect_action(result, actions)
                 trace.append({
                     'step': step + 1, 'tool': tool_name, 'args': tool_args,
                     'result': _truncate(result), 'ok': True,
@@ -226,7 +234,7 @@ def run_agent(
                 messages.append({'role': 'assistant', 'content': reply})
                 messages.append({
                     'role': 'user',
-                    'content': f'工具 {tool_name} 返回（{tool_duration_ms}ms）:\n{json.dumps(result, ensure_ascii=False)[:3000]}\n请继续或给出最终回答。',
+                    'content': f'工具 {tool_name} 返回（{tool_duration_ms}ms）:\n{json.dumps(result, ensure_ascii=False)[:3000]}\n请继续或给出最终回答。若已 navigate_page，在 answer 中告知用户即将跳转。',
                 })
                 continue
             except Exception as e:
@@ -241,12 +249,12 @@ def run_agent(
                 })
                 continue
 
-        return {'reply': reply, 'steps': trace, 'model': mid, 'finished': True, 'permission_requests': permission_requests}
+        return {'reply': reply, 'steps': trace, 'actions': actions, 'model': mid, 'finished': True, 'permission_requests': permission_requests}
 
     # 达到最大步数，强制总结
     messages.append({'role': 'user', 'content': '请根据已有信息给出最终回答（不要再调用工具）。'})
     final = chat(messages, model_id=mid, max_tokens=1024, temperature=0.5)
-    return {'reply': final, 'steps': trace, 'model': mid, 'finished': True, 'permission_requests': permission_requests}
+    return {'reply': final, 'steps': trace, 'actions': actions, 'model': mid, 'finished': True, 'permission_requests': permission_requests}
 
 
 def _build_context_info(context: dict | None) -> str:

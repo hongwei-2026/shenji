@@ -348,18 +348,65 @@ BUILTIN_TOOLS: list[dict] = [
     },
     # ── 导航辅助 ──
     {
-        'name': 'navigate_to',
-        'description': '建议用户导航到审计系统的某个页面。返回一个可点击的链接。',
+        'name': 'navigate_page',
+        'description': '跳转到系统页面（财务/审计/协作）。用户说「打开/去/跳转」某功能时使用。',
         'parameters': {
             'type': 'object',
             'properties': {
                 'page': {
                     'type': 'string',
-                    'description': '目标页面: dashboard(仪表盘), preview(数据预览), analysis(审计分析), report(报告), history(历史), chat(消息), agent(AI Agent工作台), edit(表格编辑), profile(个人中心), search(搜索)',
-                    'enum': ['dashboard', 'preview', 'analysis', 'report', 'history', 'chat', 'agent', 'edit', 'profile', 'search', 'index'],
+                    'description': '页面标识: finance, vouchers, payables, receivables, invoices, reconciliation, approvals, tasks, dashboard, analysis, report, edit, chat, agent, history, home 等',
                 },
+                'reason': {'type': 'string', 'description': '跳转原因'},
+                'query': {'type': 'string', 'description': '可选 URL 查询参数'},
             },
             'required': ['page'],
+        },
+        'source': 'builtin',
+        'permission': 'read',
+    },
+    {
+        'name': 'navigate_to',
+        'description': '同 navigate_page，跳转到系统页面。',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'page': {'type': 'string', 'description': '目标页面标识'},
+                'reason': {'type': 'string'},
+            },
+            'required': ['page'],
+        },
+        'source': 'builtin',
+        'permission': 'read',
+    },
+    {
+        'name': 'get_finance_overview',
+        'description': '获取财务总览：科目余额、期间、凭证统计',
+        'parameters': {'type': 'object', 'properties': {}},
+        'source': 'builtin',
+        'permission': 'read',
+    },
+    {
+        'name': 'list_vouchers',
+        'description': '列出最近的记账凭证',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'limit': {'type': 'integer'},
+                'status': {'type': 'string'},
+            },
+        },
+        'source': 'builtin',
+        'permission': 'read',
+    },
+    {
+        'name': 'list_invoices',
+        'description': '列出应收/应付发票',
+        'parameters': {
+            'type': 'object',
+            'properties': {
+                'invoice_type': {'type': 'string', 'description': 'ar 应收 或 ap 应付'},
+            },
         },
         'source': 'builtin',
         'permission': 'read',
@@ -419,8 +466,12 @@ def run_builtin(name: str, args: dict, context: dict | None = None) -> Any | Non
         'search_users': lambda: _search_users(args.get('q', ''), user_id),
         # 用户
         'get_my_profile': lambda: _my_profile(user_id),
-        # 导航
-        'navigate_to': lambda: _navigate(args.get('page', '')),
+        # 导航 / 财务
+        'navigate_to': lambda: _navigate(args if isinstance(args, dict) else {'page': str(args)}),
+        'navigate_page': lambda: _navigate(args if isinstance(args, dict) else {'page': str(args)}),
+        'get_finance_overview': lambda: _finance_overview(user_id),
+        'list_vouchers': lambda: _list_vouchers(user_id, args),
+        'list_invoices': lambda: _list_invoices(user_id, args),
     }
 
     handler = handlers.get(name)
@@ -783,26 +834,59 @@ def _my_profile(user_id: int | None) -> dict:
     return {'user': {'id': user['id'], 'username': user['username'], 'created_at': user.get('created_at')}, 'stats': stats}
 
 
-def _navigate(page: str) -> dict:
-    urls = {
-        'dashboard': '/dashboard', 'preview': '/preview', 'analysis': '/analysis',
-        'report': '/report', 'history': '/history', 'chat': '/chat',
-        'agent': '/agent', 'edit': '/edit', 'profile': '/profile',
-        'search': '/search', 'index': '/',
-    }
-    url = urls.get(page, '/')
-    names = {
-        'dashboard': '仪表盘', 'preview': '数据预览', 'analysis': '审计分析',
-        'report': '审计报告', 'history': '历史记录', 'chat': '消息',
-        'agent': 'AI Agent 工作台', 'edit': '表格编辑', 'profile': '个人中心',
-        'search': '搜索', 'index': '首页',
-    }
+def _navigate(page_or_args) -> dict:
+    """跳转页面，返回前端可执行的 navigate action。"""
+    from modules.ai.page_registry import resolve_page, PAGES
+    if isinstance(page_or_args, dict):
+        page = (page_or_args.get('page') or '').strip().lower()
+        reason = (page_or_args.get('reason') or '').strip()
+        query = (page_or_args.get('query') or '').strip()
+    else:
+        page = str(page_or_args or '').strip().lower()
+        reason = ''
+        query = ''
+    url = resolve_page(page, query)
+    label = PAGES.get(page, {}).get('label', page)
     return {
-        'page': page,
-        'name': names.get(page, page),
+        'action': 'navigate',
         'url': url,
-        'message': f'点击前往「{names.get(page, page)}」: {url}',
+        'page': page,
+        'name': label,
+        'reason': reason or f'正在为您打开「{label}」',
+        'delay_ms': 1000,
+        'message': f'点击前往「{label}」: {url}',
     }
+
+
+def _finance_overview(user_id: int | None) -> dict:
+    if not user_id:
+        return {'error': '未登录'}
+    try:
+        from modules.database import get_finance_overview, ensure_finance_seed
+        ensure_finance_seed(user_id)
+        return get_finance_overview(user_id)
+    except Exception as e:
+        return {'error': str(e)}
+
+
+def _list_vouchers(user_id: int | None, args: dict) -> dict:
+    if not user_id:
+        return {'vouchers': [], 'error': '未登录'}
+    try:
+        from modules.database import list_fin_vouchers
+        return {'vouchers': list_fin_vouchers(user_id, limit=int(args.get('limit') or 10), status=args.get('status'))}
+    except Exception as e:
+        return {'vouchers': [], 'error': str(e)}
+
+
+def _list_invoices(user_id: int | None, args: dict) -> dict:
+    if not user_id:
+        return {'invoices': [], 'error': '未登录'}
+    try:
+        from modules.enterprise_db import list_invoices
+        return {'invoices': list_invoices(user_id, invoice_type=args.get('invoice_type'), limit=15)}
+    except Exception as e:
+        return {'invoices': [], 'error': str(e)}
 
 
 # ============================================================

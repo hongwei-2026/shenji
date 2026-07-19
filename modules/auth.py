@@ -18,6 +18,7 @@ from modules.database import (
     get_user_by_token,
     delete_auth_token,
     update_user_profile,
+    auto_friend_same_company,
 )
 from modules.roles import resolve_registration_profile
 
@@ -41,7 +42,10 @@ def register_user(username: str, password: str, profile: dict | None = None) -> 
         return False, '密码至少 4 个字符', None
     if get_user_by_username(username):
         return False, '用户名已存在', None
-    resolved = resolve_registration_profile(profile or {})
+    try:
+        resolved = resolve_registration_profile(profile or {})
+    except ValueError as exc:
+        return False, str(exc), None
     user_id = db_create_user(
         username,
         hash_password(password),
@@ -49,7 +53,11 @@ def register_user(username: str, password: str, profile: dict | None = None) -> 
         theme=resolved['theme'],
         page_style=resolved['page_style'],
         preferences=resolved['preferences'],
+        company=resolved.get('company') or '',
     )
+    company = (resolved.get('company') or '').strip()
+    if company:
+        auto_friend_same_company(user_id, company)
     return True, '注册成功', user_id
 
 

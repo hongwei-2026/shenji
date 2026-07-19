@@ -71,12 +71,17 @@ function initNotificationCenter() {
   document.addEventListener('click', () => panel.classList.remove('show'));
   panel.addEventListener('click', (e) => e.stopPropagation());
 
-  refresh();
-  setInterval(refresh, 5000);
-  checkCallNotifications();
-  setInterval(checkCallNotifications, 4000);
-  checkMessageNotifications();
-  setInterval(checkMessageNotifications, 4000);
+  function pollWhenVisible(fn, intervalMs) {
+    fn();
+    setInterval(() => { if (!document.hidden) fn(); }, intervalMs);
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) fn();
+    });
+  }
+
+  pollWhenVisible(refresh, 15000);
+  pollWhenVisible(checkCallNotifications, 10000);
+  pollWhenVisible(checkMessageNotifications, 15000);
 }
 
 let _lastMsgToastAt = 0;

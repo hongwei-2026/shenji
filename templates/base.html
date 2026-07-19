@@ -3,12 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{% block title %}财务审计工作台{% endblock %}</title>
+<title>{% block title %}智能财务系统{% endblock %}</title>
 <link rel="icon" href="/favicon.ico" type="image/svg+xml">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#c45c26">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="财务系统">
+<meta name="application-name" content="智能财务系统">
 <link href="{{ url_for('static', filename='vendor/bootstrap/css/bootstrap.min.css') }}" rel="stylesheet">
 <link href="{{ url_for('static', filename='vendor/datatables/css/dataTables.bootstrap5.min.css') }}" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=9">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ ui_build|default('13') }}">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta name="ui-build" content="{{ ui_build|default('13') }}">
 {% if user_accent %}
 <style>:root { --accent: {{ user_accent }}; --accent-hover: {{ user_accent }}; }</style>
 {% endif %}
@@ -19,53 +29,70 @@
   {% if g.current_user and request.path not in ('/login',) %}
   <aside class="app-sidebar" id="appSidebar">
     <div class="sidebar-brand">
-      <span class="brand-mark">审</span>
+      <span class="brand-mark">财</span>
       <div class="brand-text">
-        <strong>财务审计工作台</strong>
-        <small>{{ user_role_label|default('用户') }} · {{ user_theme|default('default') }}</small>
+        <strong>智能财务系统</strong>
+        <small>{{ user_role_label|default('用户') }}{% if user_company %} · {{ user_company }}{% else %} · 核算·协作·AI{% endif %}</small>
       </div>
     </div>
     <nav class="sidebar-nav">
       {% set uf = user_features|default({}) %}
+      {% if uf.get('finance') or uf.get('vouchers') or uf.get('receivables') or uf.get('payables') or uf.get('invoices') or uf.get('reconciliation') %}
+      <div class="nav-section-label">财务核算</div>
+      {% if uf.get('finance') %}<a class="nav-item" href="/finance" data-path="/finance"><i class="bi bi-bank2"></i><span>财务总览</span></a>{% endif %}
+      {% if uf.get('vouchers') %}<a class="nav-item" href="/finance/vouchers" data-path="/finance/vouchers"><i class="bi bi-journal-text"></i><span>凭证管理</span></a>{% endif %}
+      {% if uf.get('receivables') %}<a class="nav-item" href="/finance/receivables" data-path="/finance/receivables"><i class="bi bi-cash-coin"></i><span>应收账款</span></a>{% endif %}
+      {% if uf.get('payables') %}<a class="nav-item" href="/finance/payables" data-path="/finance/payables"><i class="bi bi-credit-card"></i><span>应付账款</span></a>{% endif %}
+      {% if uf.get('invoices') %}<a class="nav-item" href="/finance/invoices" data-path="/finance/invoices"><i class="bi bi-receipt"></i><span>发票管理</span></a>{% endif %}
+      {% if uf.get('reconciliation') %}<a class="nav-item" href="/finance/reconciliation" data-path="/finance/reconciliation"><i class="bi bi-bank"></i><span>银行对账</span></a>{% endif %}
+      {% endif %}
+      {% if uf.get('approvals') or uf.get('tasks') %}
       <div class="nav-section-label">工作流</div>
-      {% if uf.get('upload', true) %}<a class="nav-item" href="/" data-path="/"><i class="bi bi-file-arrow-up"></i><span>数据导入</span></a>{% endif %}
-      {% if uf.get('edit', true) %}<a class="nav-item" href="/edit" data-path="/edit"><i class="bi bi-pencil-square"></i><span>表格编辑</span></a>{% endif %}
-      {% if uf.get('preview', true) %}<a class="nav-item" href="/preview" data-path="/preview"><i class="bi bi-layout-text-window"></i><span>数据预览</span></a>{% endif %}
+      {% if uf.get('approvals') %}<a class="nav-item" href="/workflow/approvals" data-path="/workflow/approvals"><i class="bi bi-check2-square"></i><span>审批中心</span></a>{% endif %}
+      {% if uf.get('tasks') %}<a class="nav-item" href="/workflow/tasks" data-path="/workflow/tasks"><i class="bi bi-list-task"></i><span>任务中心</span></a>{% endif %}
+      {% endif %}
+      {% if uf.get('upload') or uf.get('edit') or uf.get('preview') %}
+      <div class="nav-section-label">数据</div>
+      {% if uf.get('upload') %}<a class="nav-item" href="/" data-path="/"><i class="bi bi-file-arrow-up"></i><span>数据导入</span></a>{% endif %}
+      {% if uf.get('edit') %}<a class="nav-item" href="/edit" data-path="/edit"><i class="bi bi-pencil-square"></i><span>表格编辑</span></a>{% endif %}
+      {% if uf.get('preview') %}<a class="nav-item" href="/preview" data-path="/preview"><i class="bi bi-layout-text-window"></i><span>数据预览</span></a>{% endif %}
+      {% endif %}
+      {% if uf.get('dashboard') or uf.get('analysis') or uf.get('report') %}
       <div class="nav-section-label">分析</div>
-      {% if uf.get('dashboard', true) %}<a class="nav-item" href="/dashboard" data-path="/dashboard"><i class="bi bi-bar-chart-line"></i><span>审计概览</span></a>{% endif %}
-      {% if uf.get('analysis', true) %}<a class="nav-item" href="/analysis" data-path="/analysis"><i class="bi bi-clipboard2-check"></i><span>规则检测</span></a>{% endif %}
-      {% if uf.get('report', true) %}<a class="nav-item" href="/report" data-path="/report"><i class="bi bi-file-text"></i><span>审计报告</span></a>{% endif %}
+      {% if uf.get('dashboard') %}<a class="nav-item" href="/dashboard" data-path="/dashboard"><i class="bi bi-bar-chart-line"></i><span>审计概览</span></a>{% endif %}
+      {% if uf.get('analysis') %}<a class="nav-item" href="/analysis" data-path="/analysis"><i class="bi bi-clipboard2-check"></i><span>规则检测</span></a>{% endif %}
+      {% if uf.get('report') %}<a class="nav-item" href="/report" data-path="/report"><i class="bi bi-file-text"></i><span>审计报告</span></a>{% endif %}
+      {% endif %}
+      {% if uf.get('history') or uf.get('chat') %}
       <div class="nav-section-label">协作</div>
-      {% if uf.get('history', true) %}<a class="nav-item" href="/history" data-path="/history"><i class="bi bi-archive"></i><span>历史记录</span></a>{% endif %}
-      {% if uf.get('chat', true) %}<a class="nav-item position-relative" href="/chat" data-path="/chat">
+      {% if uf.get('history') %}<a class="nav-item" href="/history" data-path="/history"><i class="bi bi-archive"></i><span>历史记录</span></a>{% endif %}
+      {% if uf.get('chat') %}<a class="nav-item position-relative" href="/chat" data-path="/chat">
         <i class="bi bi-chat-left-text"></i><span>消息</span>
         <span id="unreadBadge" class="nav-badge" style="display:none">0</span>
       </a>{% endif %}
-      <div class="nav-section-label">财务核算</div>
-      <a class="nav-item" href="/finance" data-path="/finance"><i class="bi bi-calculator"></i><span>财务总览</span></a>
-      <a class="nav-item" href="/finance/vouchers" data-path="/finance/vouchers"><i class="bi bi-journal-text"></i><span>凭证管理</span></a>
-      <a class="nav-item" href="/finance/invoices" data-path="/finance/invoices"><i class="bi bi-receipt"></i><span>发票管理</span></a>
-      <div class="nav-section-label">工作流</div>
-      <a class="nav-item" href="/workflow/approvals" data-path="/workflow/approvals"><i class="bi bi-check2-circle"></i><span>审批中心</span></a>
-      <a class="nav-item" href="/workflow/tasks" data-path="/workflow/tasks"><i class="bi bi-list-check"></i><span>任务管理</span></a>
-      {% if uf.get('agent', true) %}
+      {% endif %}
+      {% if uf.get('agent') %}
+      <div class="nav-section-label">智能体</div>
       <a class="nav-item" href="/agent" data-path="/agent"><i class="bi bi-cpu"></i><span>AI Agent</span></a>
       <a class="nav-item" href="/models" data-path="/models"><i class="bi bi-gear"></i><span>模型管理</span></a>
       <a class="nav-item" href="/agent/develop" data-path="/agent/develop"><i class="bi bi-code-slash"></i><span>Agent 开发</span></a>
       {% endif %}
       <a class="nav-item" href="/profile" data-path="/profile"><i class="bi bi-person"></i><span>个人空间</span></a>
+      <button type="button" class="nav-item" data-pwa-install onclick="installFinanceApp()" style="width:100%;text-align:left;border:0;background:transparent;display:none" title="安装到桌面，像 App 一样打开">
+        <i class="bi bi-download"></i><span>安装到桌面</span>
+      </button>
     </nav>
     <div class="sidebar-user">
       <div class="sidebar-user-info">
         <span class="user-avatar">{{ g.current_user.username[0]|upper }}</span>
         <div>
           <strong>{{ g.current_user.username }}</strong>
-          <small class="d-block text-muted" style="font-size:10px">{{ user_role_label|default('') }}</small>
+          <small class="d-block text-muted" style="font-size:10px">{{ user_role_label|default('') }}{% if user_company %} · {{ user_company }}{% endif %}</small>
           <a href="/logout" class="logout-link">退出登录</a>
         </div>
       </div>
     </div>
-    <div class="sidebar-foot"><span>v2.1 · 内部参考</span></div>
+    <div class="sidebar-foot"><span>v2.2 · build {{ ui_build|default('13') }}</span></div>
   </aside>
   {% endif %}
 
@@ -73,7 +100,7 @@
     {% if g.current_user and request.path not in ('/login',) %}
     <header class="app-topbar">
       <button class="btn btn-ghost d-lg-none" type="button" id="sidebarToggle" aria-label="切换菜单"><i class="bi bi-list"></i></button>
-      {% if user_features.get('search', true) %}
+      {% if user_features.get('search') %}
       <form class="topbar-search" id="webSearchForm" action="/search" method="get">
         <i class="bi bi-search"></i>
         <input type="text" name="q" id="webSearchInput" placeholder="全文检索" autocomplete="off" required>
@@ -111,7 +138,7 @@
 {% if g.current_user and request.path not in ('/login',) %}
 <div class="sidebar-backdrop d-lg-none" id="sidebarBackdrop"></div>
 
-{% if user_features.get('ai', true) %}
+{% if user_features.get('ai') %}
 <div id="aiFloatingBtn" class="ai-floating-btn" title="AI 智能助手 - 可拖拽，点击打开对话">
   <i class="bi bi-robot"></i>
 </div>
@@ -125,7 +152,7 @@
     </div>
   </div>
   <div class="ai-chat-body" id="aiChatBody">
-    <div class="ai-message ai-bot"><div class="ai-bubble">你好！我是本地 Qwen2.5-0.5B 审计助手，可以问我财务审计、数据解读或系统使用问题。</div></div>
+    <div class="ai-message ai-bot"><div class="ai-bubble">你好！我是财务智能 Agent，可以查账、做审计、跳转页面帮你完成工作。试试说「打开凭证管理」或「查看财务总览」。</div></div>
   </div>
   <div class="ai-chat-footer">
     <div class="input-group input-group-sm">
@@ -156,114 +183,7 @@
   </div>
 </div>
 
-<!-- Agent 侧边栏（全局） -->
-{% if g.current_user and request.endpoint not in ('agent_page_agent', 'login_page', 'api_auth_login', 'api_auth_register') %}
-<div id="agentSidebar" class="agent-global-sidebar" style="display:none">
-  <div class="agent-sidebar-header">
-    <span><i class="bi bi-cpu"></i> AI Agent 助手</span>
-    <button type="button" class="btn-close btn-close-white" onclick="toggleAgentSidebar()"></button>
-  </div>
-  <div class="agent-sidebar-msgs" id="agentSidebarMsgs">
-    <div class="agent-msg bot">
-      <div class="agent-bubble small">你好！我可以帮你操作当前页面的审计功能。有什么需要？</div>
-    </div>
-  </div>
-  <div id="agentSidebarAttach" style="display:none;padding:0 10px 4px"></div>
-  <div class="agent-sidebar-input">
-    <label class="btn btn-sm btn-outline-secondary mb-0" for="agentSidebarFileInput" title="上传文件"><i class="bi bi-paperclip"></i></label>
-    <input type="file" id="agentSidebarFileInput" style="display:none" accept=".csv,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.bmp,.webp" onchange="onSidebarFileSelected(this)">
-    <input type="text" id="agentSidebarInput" class="form-control form-control-sm" placeholder="输入指令…" onkeypress="if(event.key==='Enter')sendAgentSidebarMsg()">
-    <button class="btn btn-sm btn-primary" onclick="sendAgentSidebarMsg()"><i class="bi bi-send"></i></button>
-  </div>
-</div>
-<button type="button" id="agentSidebarToggle" class="btn btn-primary agent-toggle-btn" onclick="toggleAgentSidebar()" title="AI Agent 助手">
-  <i class="bi bi-cpu"></i>
-</button>
-<style>
-.agent-global-sidebar { position:fixed; right:0; top:0; width:380px; height:100vh; background:#fff; border-left:2px solid var(--ink); z-index:1050; display:flex; flex-direction:column; box-shadow:-4px 0 20px rgba(0,0,0,.15); }
-.agent-sidebar-header { padding:12px 16px; background:var(--ink); color:#fff; display:flex; justify-content:space-between; align-items:center; text-transform:uppercase; letter-spacing:.5px; font-weight:700; font-size:13px; }
-.agent-sidebar-msgs { flex:1; overflow-y:auto; padding:12px; background:var(--paper); }
-.agent-sidebar-input { padding:10px; border-top:2px solid var(--ink); display:flex; gap:6px; }
-.agent-toggle-btn { position:fixed; right:20px; bottom:80px; width:48px; height:48px; z-index:1040; box-shadow:var(--shadow-md); display:flex; align-items:center; justify-content:center; font-size:20px; border:2px solid var(--accent); background:var(--ink); color:#fff; }
-.agent-toggle-btn .badge { position:absolute; top:-4px; right:-4px; font-size:10px; }
-</style>
-<script>
-function toggleAgentSidebar() {
-  const sidebar = document.getElementById('agentSidebar');
-  const btn = document.getElementById('agentSidebarToggle');
-  if (sidebar.style.display === 'none') { sidebar.style.display = 'flex'; btn.style.display = 'none'; }
-  else { sidebar.style.display = 'none'; btn.style.display = 'flex'; }
-}
-let _sidebarConversation = [];
-let _sidebarPendingFile = null;
-
-function onSidebarFileSelected(input) {
-  const file = input.files[0];
-  if (!file) return;
-  const ext = file.name.split('.').pop().toLowerCase();
-  if (!['csv','xls','xlsx','png','jpg','jpeg','gif','bmp','webp'].includes(ext)) {
-    document.getElementById('agentSidebarMsgs').innerHTML += '<div class="agent-msg bot"><div class="agent-bubble small text-danger">不支持: .'+ext+'</div></div>';
-    return;
-  }
-  _sidebarPendingFile = file;
-  document.getElementById('agentSidebarAttach').style.display = 'block';
-  document.getElementById('agentSidebarAttach').innerHTML = '<span class="small">📎 '+file.name+' ('+(file.size/1024).toFixed(1)+'KB) <a href="#" onclick="_sidebarPendingFile=null;document.getElementById(\'agentSidebarAttach\').style.display=\'none\'">✕</a></span>';
-}
-
-function sendAgentSidebarMsg() {
-  const input = document.getElementById('agentSidebarInput');
-  const msg = input?.value?.trim();
-  const msgsEl = document.getElementById('agentSidebarMsgs');
-
-  // 先处理附件
-  if (_sidebarPendingFile) {
-    msgsEl.innerHTML += '<div class="agent-msg user"><div class="agent-bubble small" style="background:var(--accent);color:#fff">📎 '+_sidebarPendingFile.name+'</div></div>';
-    const formData = new FormData();
-    formData.append('file', _sidebarPendingFile);
-    _sidebarPendingFile = null;
-    document.getElementById('agentSidebarAttach').style.display = 'none';
-    fetch('/api/agent/upload', {method:'POST', body:formData})
-      .then(r => r.json())
-      .then(d => {
-        if (d.success) {
-          msgsEl.innerHTML += '<div class="agent-msg bot"><div class="agent-bubble small">'+d.reply.replace(/\n/g,'<br>')+'</div></div>';
-          msgsEl.scrollTop = msgsEl.scrollHeight;
-        }
-      });
-  }
-  if (!msg) { input.value = ''; return; }
-
-  msgsEl.innerHTML += '<div class="agent-msg user"><div class="agent-bubble small" style="background:var(--accent);color:#fff">'+msg+'</div></div>';
-  input.value = '';
-  msgsEl.innerHTML += '<div class="agent-msg bot"><div class="agent-bubble small">💭 思考中…</div></div>';
-  msgsEl.scrollTop = msgsEl.scrollHeight;
-
-  fetch('/api/agent/chat', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({
-      message:msg, use_tools:true, permission_mode:'ask',
-      current_page: document.body.dataset.currentPage || window.location.pathname.replace('/','') || 'index',
-    }),
-  }).then(r=>r.json()).then(d=>{
-    const last = msgsEl.querySelector('.agent-msg.bot:last-child .agent-bubble');
-    if (d.success) {
-      last.innerHTML = (d.reply||'').replace(/\n/g,'<br>');
-      if (d.needs_permission) last.innerHTML += '<br><br><button class="btn btn-sm btn-primary" onclick="sendAgentSidebarMsg()">✅ 确认操作</button>';
-    } else {
-      last.innerHTML = '❌ ' + (d.error||'未知错误');
-      last.classList.add('text-danger');
-    }
-    msgsEl.scrollTop = msgsEl.scrollHeight;
-  }).catch(err=>{
-    const last = msgsEl.querySelector('.agent-msg.bot:last-child .agent-bubble');
-    last.innerHTML = '❌ 请求失败: ' + err.message;
-    msgsEl.scrollTop = msgsEl.scrollHeight;
-  });
-}
-document.body.dataset.currentPage = window.location.pathname.replace('/','') || 'index';
-</script>
-{% endif %}
-
+{% if user_features.get('video') %}
 <div id="videoCallOverlay" class="video-call-overlay" style="display:none">
   <div class="video-call-box">
     <div class="video-call-header">
@@ -277,7 +197,10 @@ document.body.dataset.currentPage = window.location.pathname.replace('/','') || 
   </div>
 </div>
 <script>window.__enableVideoCall = true; window.__currentUserId = {{ g.current_user.id }};</script>
-<script src="{{ url_for('static', filename='js/webrtc-call.js') }}?v=4"></script>
+<script src="{{ url_for('static', filename='js/webrtc-call.js') }}?v={{ ui_build|default('13') }}"></script>
+{% else %}
+<script>window.__enableVideoCall = false; window.__currentUserId = {{ g.current_user.id }};</script>
+{% endif %}
 {% endif %}
 
 <script src="{{ url_for('static', filename='vendor/bootstrap/js/bootstrap.bundle.min.js') }}"></script>
@@ -285,8 +208,10 @@ document.body.dataset.currentPage = window.location.pathname.replace('/','') || 
 <script src="{{ url_for('static', filename='vendor/jquery/jquery.min.js') }}"></script>
 <script src="{{ url_for('static', filename='vendor/datatables/js/jquery.dataTables.min.js') }}"></script>
 <script src="{{ url_for('static', filename='vendor/datatables/js/dataTables.bootstrap5.min.js') }}"></script>
-<script src="{{ url_for('static', filename='js/main.js') }}?v=2"></script>
-<script src="{{ url_for('static', filename='js/features.js') }}"></script>
+<script src="{{ url_for('static', filename='js/agent_actions.js') }}?v={{ ui_build|default('13') }}"></script>
+<script src="{{ url_for('static', filename='js/main.js') }}?v={{ ui_build|default('13') }}"></script>
+<script src="{{ url_for('static', filename='js/features.js') }}?v={{ ui_build|default('13') }}"></script>
+<script src="{{ url_for('static', filename='js/pwa.js') }}?v={{ ui_build|default('13') }}"></script>
 {% block extra_scripts %}{% endblock %}
 </body>
 </html>
