@@ -41,13 +41,55 @@
       <div class="spinner-border text-primary" style="width:3rem;height:3rem"></div>
       <p class="mt-3 text-muted">正在加载仪表盘数据...</p>
     </div>
-    <div class="row mb-4" id="statsCards" style="display:none"></div>
-    <div class="row mb-4" id="chartsArea" style="display:none">
-      <div class="col-lg-6 mb-4"><div class="card h-100"><div class="card-header"><i class="bi bi-bar-chart"></i> Benford定律分析</div><div class="card-body"><canvas id="chartBenford" height="280"></canvas></div></div></div>
-      <div class="col-lg-6 mb-4"><div class="card h-100"><div class="card-header"><i class="bi bi-pie-chart"></i> 风险分布</div><div class="card-body"><canvas id="chartRisk" height="280"></canvas></div></div></div>
-      <div class="col-lg-6 mb-4"><div class="card h-100"><div class="card-header"><i class="bi bi-graph-up"></i> 金额分布</div><div class="card-body"><canvas id="chartAmount" height="280"></canvas></div></div></div>
-      <div class="col-lg-6 mb-4"><div class="card h-100"><div class="card-header"><i class="bi bi-diagram-3"></i> 分类占比</div><div class="card-body"><canvas id="chartCategory" height="280"></canvas></div></div></div>
-      <div class="col-12 mb-4"><div class="card"><div class="card-header"><i class="bi bi-activity"></i> 时间趋势</div><div class="card-body"><canvas id="chartTimeTrend" height="250"></canvas></div></div></div>
+
+    <div id="pbiOverviewShell" style="display:none">
+      <div class="pbi-toolbar" data-pbi-toolbar="audit-dashboard-v2">
+        <button type="button" class="btn btn-sm btn-outline-primary" data-pbi-toggle-edit>
+          <i class="bi bi-pencil-square"></i> 编辑布局
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-pbi-reset>
+          <i class="bi bi-arrow-counterclockwise"></i> 重置布局
+        </button>
+        <span class="pbi-hint">右侧「可视化」可拖入新图形；编辑后拖标题栏移动、右下角缩放</span>
+      </div>
+
+      <div class="pbi-canvas" id="auditPbiCanvas" data-pbi-key="audit-dashboard-v2" data-pbi-defer="1">
+        <div class="pbi-widget" data-id="kpi" data-title="关键指标"
+             data-x="0" data-y="0" data-w="12" data-h="2"
+             data-default-x="0" data-default-y="0" data-default-w="12" data-default-h="2">
+          <div class="pbi-kpi-grid" id="statsCards"></div>
+        </div>
+
+        <div class="pbi-widget" data-id="benford" data-title="Benford 定律分析"
+             data-x="0" data-y="2" data-w="6" data-h="5"
+             data-default-x="0" data-default-y="2" data-default-w="6" data-default-h="5">
+          <canvas id="chartBenford"></canvas>
+        </div>
+
+        <div class="pbi-widget" data-id="risk" data-title="风险分布"
+             data-x="6" data-y="2" data-w="6" data-h="5"
+             data-default-x="6" data-default-y="2" data-default-w="6" data-default-h="5">
+          <canvas id="chartRisk"></canvas>
+        </div>
+
+        <div class="pbi-widget" data-id="amount" data-title="金额分布"
+             data-x="0" data-y="7" data-w="6" data-h="5"
+             data-default-x="0" data-default-y="7" data-default-w="6" data-default-h="5">
+          <canvas id="chartAmount"></canvas>
+        </div>
+
+        <div class="pbi-widget" data-id="category" data-title="分类占比"
+             data-x="6" data-y="7" data-w="6" data-h="5"
+             data-default-x="6" data-default-y="7" data-default-w="6" data-default-h="5">
+          <canvas id="chartCategory"></canvas>
+        </div>
+
+        <div class="pbi-widget" data-id="trend" data-title="时间趋势"
+             data-x="0" data-y="12" data-w="12" data-h="4"
+             data-default-x="0" data-default-y="12" data-default-w="12" data-default-h="4">
+          <canvas id="chartTimeTrend"></canvas>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -202,74 +244,154 @@ function loadOverview() {
     .then(r => r.json())
     .then(data => {
       document.getElementById('loadingArea').style.display = 'none';
+      document.getElementById('pbiOverviewShell').style.display = 'block';
+
       if (!data.success) {
-        document.getElementById('loadingArea').innerHTML = '<div class="alert alert-warning">未上传数据，请先 <a href="/">上传文件</a></div>';
-        document.getElementById('loadingArea').style.display = 'block';
+        document.getElementById('statsCards').innerHTML =
+          '<div class="pbi-kpi-card" style="grid-column:1/-1"><div class="lbl">暂无审计数据 — 请先 <a href="/">上传文件</a>。仍可从右侧拖入示例图形搭建仪表盘。</div></div>';
+        window.__auditDashData = { summary: {}, score: {}, audit_summary: {}, charts: {} };
+        requestAnimationFrame(() => {
+          const canvas = document.getElementById('auditPbiCanvas');
+          if (canvas && !canvas._pbi && window.PbiDashboard) {
+            canvas._pbi = new PbiDashboard(canvas, {
+              storageKey: 'audit-dashboard-v2',
+              dataProvider() { return {}; },
+            });
+          }
+        });
         return;
       }
-      document.getElementById('statsCards').style.display = 'flex';
-      document.getElementById('chartsArea').style.display = 'flex';
+
       document.getElementById('aiArea').style.display = 'flex';
 
       const s = data.summary || {};
       const sc = data.score || {};
       const as = data.audit_summary || {};
 
-      let cardHtml = '';
-      cardHtml += '<div class="col-md-2 col-sm-4 mb-2"><div class="card bg-primary text-white h-100"><div class="card-body text-center p-2"><h4>' + (s.total_rows||0).toLocaleString() + '</h4><small>数据行数</small></div></div></div>';
-      cardHtml += '<div class="col-md-2 col-sm-4 mb-2"><div class="card bg-info text-white h-100"><div class="card-body text-center p-2"><h4>' + (s.total_columns||0) + '</h4><small>数据列数</small></div></div></div>';
-      cardHtml += '<div class="col-md-2 col-sm-4 mb-2"><div class="card bg-danger text-white h-100"><div class="card-body text-center p-2"><h4>' + (as.high_risk||0) + '</h4><small>高风险</small></div></div></div>';
-      cardHtml += '<div class="col-md-2 col-sm-4 mb-2"><div class="card bg-warning text-white h-100"><div class="card-body text-center p-2"><h4>' + (as.medium_risk||0) + '</h4><small>中风险</small></div></div></div>';
-      cardHtml += '<div class="col-md-2 col-sm-4 mb-2"><div class="card bg-success text-white h-100"><div class="card-body text-center p-2"><h4>' + (as.low_risk||0) + '</h4><small>低风险</small></div></div></div>';
-      cardHtml += '<div class="col-md-2 col-sm-4 mb-2"><div class="card bg-secondary text-white h-100"><div class="card-body text-center p-2"><h4>' + (sc.risk_percentage||0) + '%</h4><small>风险评分</small></div></div></div>';
-      document.getElementById('statsCards').innerHTML = cardHtml;
+      const kpis = [
+        { val: (s.total_rows||0).toLocaleString(), lbl: '数据行数', bg: 'var(--blue)' },
+        { val: String(s.total_columns||0), lbl: '数据列数', bg: 'var(--info,#2563eb)' },
+        { val: String(as.high_risk||0), lbl: '高风险', bg: 'var(--rose)' },
+        { val: String(as.medium_risk||0), lbl: '中风险', bg: 'var(--warn)' },
+        { val: String(as.low_risk||0), lbl: '低风险', bg: 'var(--green)' },
+        { val: (sc.risk_percentage||0) + '%', lbl: '风险评分', bg: 'var(--ink)' },
+      ];
+      document.getElementById('statsCards').innerHTML = kpis.map(k =>
+        `<div class="pbi-kpi-card"><div class="val" style="color:${k.bg}">${k.val}</div><div class="lbl">${k.lbl}</div></div>`
+      ).join('');
 
       const c = data.charts || {};
       renderOverviewCharts(c);
+
+      // 延迟一帧初始化画布，确保 DOM 尺寸就绪；已存在则仅重排
+      requestAnimationFrame(() => {
+        const canvas = document.getElementById('auditPbiCanvas');
+        if (!canvas) return;
+        window.__auditDashData = { summary: s, score: sc, audit_summary: as, charts: c };
+        if (!canvas._pbi && window.PbiDashboard) {
+          canvas._pbi = new PbiDashboard(canvas, {
+            storageKey: 'audit-dashboard-v2',
+            dataProvider() {
+              const d = window.__auditDashData || {};
+              const charts = d.charts || {};
+              const out = {};
+              if (charts.risk_distribution) {
+                out.pie = { labels: charts.risk_distribution.labels, values: charts.risk_distribution.values };
+              }
+              if (charts.amount_distribution) {
+                out.series = { labels: charts.amount_distribution.labels, values: charts.amount_distribution.values };
+              } else if (charts.time_trend) {
+                out.series = { labels: charts.time_trend.labels, values: charts.time_trend.values };
+              } else if (charts.benford_data) {
+                out.series = { labels: charts.benford_data.labels, values: charts.benford_data.observed };
+              }
+              if (charts.category_data) {
+                out.pie = out.pie || { labels: charts.category_data.labels, values: charts.category_data.values };
+              }
+              const as2 = d.audit_summary || {};
+              out.card = {
+                value: String(as2.high_risk || 0),
+                label: '高风险项',
+                delta: `评分 ${((d.score || {}).risk_percentage || 0)}%`,
+              };
+              out.table = {
+                headers: ['指标', '数值'],
+                rows: [
+                  ['数据行数', (d.summary || {}).total_rows || 0],
+                  ['高风险', as2.high_risk || 0],
+                  ['中风险', as2.medium_risk || 0],
+                  ['低风险', as2.low_risk || 0],
+                ],
+              };
+              return out;
+            },
+          });
+        } else if (canvas._pbi) {
+          canvas._pbi.render();
+          canvas._pbi.refreshData();
+          canvas._pbi._notifyResize();
+        }
+      });
     })
     .catch(err => {
       document.getElementById('loadingArea').innerHTML = '<div class="alert alert-danger">加载失败: ' + err.message + '</div>';
     });
 }
 
+function chartOpts(extra) {
+  return Object.assign({
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: { legend: { labels: { boxWidth: 12, font: { size: 11 } } } },
+  }, extra || {});
+}
+
 function renderOverviewCharts(c) {
   destroyCharts(allCharts);
-  if (c.benford_data) {
-    allCharts.benford = new Chart(document.getElementById('chartBenford'), {
+  const el = (id) => {
+    const node = document.getElementById(id);
+    if (!node) return null;
+    node.style.width = '100%';
+    node.style.height = '100%';
+    return node;
+  };
+  let node;
+  if (c.benford_data && (node = el('chartBenford'))) {
+    allCharts.benford = new Chart(node, {
       type: 'bar',
       data: {labels: c.benford_data.labels, datasets: [
         {label:'实际分布(%)',data:c.benford_data.observed,backgroundColor:'rgba(59,130,246,0.7)',borderColor:'#3b82f6',borderWidth:1},
         {label:'Benford期望(%)',data:c.benford_data.expected,type:'line',borderColor:'#ef4444',borderWidth:2,fill:false,pointRadius:3}
       ]},
-      options: {responsive:true,plugins:{title:{display:true,text:'首位数字分布 vs Benford期望'}}}
+      options: chartOpts({ plugins: { title: { display: false }, legend: { labels: { boxWidth: 12 } } } })
     });
   }
-  if (c.risk_distribution) {
-    allCharts.risk = new Chart(document.getElementById('chartRisk'), {
+  if (c.risk_distribution && (node = el('chartRisk'))) {
+    allCharts.risk = new Chart(node, {
       type: 'doughnut',
       data: {labels:c.risk_distribution.labels,datasets:[{data:c.risk_distribution.values,backgroundColor:['#ef4444','#f59e0b','#10b981']}]},
-      options: {responsive:true,plugins:{title:{display:true,text:'审计规则风险分布'}}}
+      options: chartOpts()
     });
   }
-  if (c.amount_distribution && c.amount_distribution.values && c.amount_distribution.values.length > 0) {
-    allCharts.amount = new Chart(document.getElementById('chartAmount'), {
+  if (c.amount_distribution && c.amount_distribution.values && c.amount_distribution.values.length > 0 && (node = el('chartAmount'))) {
+    allCharts.amount = new Chart(node, {
       type: 'bar',
       data: {labels:c.amount_distribution.labels,datasets:[{label:'交易笔数',data:c.amount_distribution.values,backgroundColor:'rgba(16,185,129,0.7)',borderColor:'#10b981',borderWidth:1}]},
-      options: {responsive:true,plugins:{title:{display:true,text:'金额区间分布'}}}
+      options: chartOpts()
     });
   }
-  if (c.category_data && c.category_data.values && c.category_data.values.length > 0) {
-    allCharts.category = new Chart(document.getElementById('chartCategory'), {
+  if (c.category_data && c.category_data.values && c.category_data.values.length > 0 && (node = el('chartCategory'))) {
+    allCharts.category = new Chart(node, {
       type: 'pie',
       data: {labels:c.category_data.labels,datasets:[{data:c.category_data.values}]},
-      options: {responsive:true,plugins:{title:{display:true,text:'分类分布'}}}
+      options: chartOpts()
     });
   }
-  if (c.time_trend && c.time_trend.values && c.time_trend.values.length > 0) {
-    allCharts.time = new Chart(document.getElementById('chartTimeTrend'), {
+  if (c.time_trend && c.time_trend.values && c.time_trend.values.length > 0 && (node = el('chartTimeTrend'))) {
+    allCharts.time = new Chart(node, {
       type: 'line',
       data: {labels:c.time_trend.labels,datasets:[{label:'日汇总金额',data:c.time_trend.values,borderColor:'#8b5cf6',fill:false,tension:0.3,pointRadius:1}]},
-      options: {responsive:true,plugins:{title:{display:true,text:'每日交易金额趋势'}}}
+      options: chartOpts()
     });
   }
 }

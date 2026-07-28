@@ -119,7 +119,7 @@ def _add_cache_headers(response):
 _analysis_cache = {}
 
 # 前端资源版本：每次发版递增，避免老账号浏览器缓存旧 UI
-UI_BUILD = '20260728b'
+UI_BUILD = '20260728e'
 
 
 @app.context_processor

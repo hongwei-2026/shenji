@@ -527,3 +527,152 @@ body.page-style-spacious .app-content { padding:36px 40px; max-width:1400px; }
   .card,.panel { box-shadow:none;border:1px solid #ccc; }
   body.app-body { background:#fff; }
 }
+
+/* ── Power BI 风格仪表盘画布 ── */
+.pbi-toolbar {
+  display:flex; align-items:center; gap:8px; flex-wrap:wrap;
+  margin-bottom:12px; padding:10px 12px;
+  background:var(--paper-elevated); border:2px solid var(--ink);
+}
+.pbi-toolbar.is-editing {
+  background:#fff7ed; border-color:var(--accent);
+  box-shadow:inset 3px 0 0 var(--accent);
+}
+.pbi-toolbar .pbi-hint { font-size:12px; color:var(--ink-muted); margin-left:4px; }
+.pbi-toolbar.is-editing .pbi-hint { color:var(--accent); font-weight:600; }
+
+.pbi-canvas {
+  position:relative; width:100%;
+  background:
+    linear-gradient(to right, rgba(17,17,17,.04) 1px, transparent 1px) 0 0 / calc((100% - 11 * var(--pbi-gap,10px)) / 12 + var(--pbi-gap,10px)) 100%,
+    linear-gradient(to bottom, rgba(17,17,17,.04) 1px, transparent 1px) 0 0 / 100% calc(var(--pbi-row-h,88px) + var(--pbi-gap,10px)),
+    var(--paper);
+  border:2px solid var(--line);
+  min-height:480px;
+  margin-bottom:24px;
+  user-select:none;
+}
+.pbi-canvas.pbi-edit {
+  border-color:var(--accent);
+  background-color:#fffdf9;
+  cursor:default;
+}
+.pbi-canvas.pbi-dragging { cursor:grabbing; }
+
+.pbi-ghost {
+  display:none; position:absolute; z-index:0; pointer-events:none;
+  background:rgba(255,107,0,.18); border:2px dashed var(--accent);
+  box-sizing:border-box;
+}
+
+.pbi-widget {
+  position:absolute; z-index:1; box-sizing:border-box;
+  background:var(--paper-elevated); border:2px solid var(--ink);
+  box-shadow:var(--shadow-sm); overflow:hidden;
+  transition: box-shadow .15s, border-color .15s;
+}
+.pbi-widget.pbi-editable { border-color:#444; }
+.pbi-widget.pbi-editable:hover { border-color:var(--accent); box-shadow:3px 3px 0 rgba(255,107,0,.35); }
+.pbi-widget.pbi-active {
+  z-index:8 !important; border-color:var(--accent);
+  box-shadow:4px 4px 0 var(--accent); opacity:.92;
+}
+
+.pbi-widget-chrome { display:flex; flex-direction:column; height:100%; min-height:0; }
+.pbi-widget-header {
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  padding:6px 10px; background:var(--ink); color:#e8ebf0;
+  font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase;
+  flex-shrink:0; cursor:default;
+}
+.pbi-edit .pbi-widget-header { cursor:grab; }
+.pbi-edit .pbi-widget-header:active { cursor:grabbing; }
+.pbi-widget-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.pbi-widget-actions { display:none; gap:4px; }
+.pbi-edit .pbi-widget-actions { display:flex; }
+.pbi-icon-btn {
+  border:none; background:transparent; color:#c8cdd8; padding:0 4px; line-height:1; cursor:pointer;
+}
+.pbi-icon-btn:hover { color:#fff; }
+.pbi-widget-body {
+  flex:1; min-height:0; overflow:auto; padding:10px 12px; position:relative;
+  background:#fff;
+}
+.pbi-widget-body:has(> canvas) {
+  padding:8px; overflow:hidden;
+}
+.pbi-widget-body > canvas {
+  display:block; width:100% !important; height:100% !important;
+}
+.pbi-widget-body .pbi-kpi-grid {
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(100px,1fr)); gap:8px; height:100%;
+}
+.pbi-widget-body .pbi-kpi-card {
+  background:var(--paper); border:1.5px solid var(--line); padding:10px; text-align:center;
+  display:flex; flex-direction:column; justify-content:center;
+}
+.pbi-widget-body .pbi-kpi-card .val { font-size:1.25rem; font-weight:700; line-height:1.2; }
+.pbi-widget-body .pbi-kpi-card .lbl { font-size:11px; color:var(--ink-muted); margin-top:4px; }
+.pbi-widget-body canvas { max-height:100% !important; }
+
+.pbi-resize-handle {
+  display:none; position:absolute; right:0; bottom:0; width:16px; height:16px;
+  cursor:nwse-resize; z-index:3;
+  background:
+    linear-gradient(135deg, transparent 50%, var(--accent) 50%);
+}
+.pbi-edit .pbi-resize-handle { display:block; }
+
+.pbi-widget-body.pbi-flush { padding:0; }
+.pbi-widget-body .table { margin-bottom:0; }
+
+/* ── Power BI 工作区 + 右侧可视化面板 ── */
+.pbi-workspace {
+  display:grid;
+  grid-template-columns: minmax(0,1fr) 220px;
+  gap:12px;
+  align-items:stretch;
+  min-height:520px;
+}
+.pbi-workspace-main { min-width:0; display:flex; flex-direction:column; gap:0; }
+.pbi-viz-pane {
+  background:#1b1b1b; color:#e8ebf0; border:2px solid #111;
+  display:flex; flex-direction:column; max-height:calc(100vh - 160px);
+  position:sticky; top:72px; overflow:hidden;
+}
+.pbi-viz-pane-head {
+  padding:12px 12px 8px; border-bottom:1px solid rgba(255,255,255,.1);
+  display:flex; flex-direction:column; gap:2px;
+}
+.pbi-viz-pane-head strong { font-size:13px; letter-spacing:.06em; text-transform:uppercase; }
+.pbi-viz-pane-head small { color:#8b93a7; font-size:11px; }
+.pbi-viz-grid {
+  display:grid; grid-template-columns:1fr 1fr; gap:6px;
+  padding:10px; overflow-y:auto; flex:1;
+}
+.pbi-viz-item {
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:4px; padding:10px 6px; min-height:64px;
+  background:#2a2a2a; border:1.5px solid #3a3a3a; color:#e8ebf0;
+  cursor:grab; font-size:11px; transition:all .12s;
+}
+.pbi-viz-item i { font-size:1.25rem; color:#ff8a3d; }
+.pbi-viz-item:hover { border-color:var(--accent); background:#333; transform:translateY(-1px); }
+.pbi-viz-item.is-dragging { opacity:.45; }
+.pbi-viz-pane-foot { padding:10px 12px 14px; border-top:1px solid rgba(255,255,255,.1); }
+.pbi-viz-pane-foot .form-select { background:#2a2a2a; color:#e8ebf0; border-color:#444; }
+.pbi-viz-tip { font-size:11px; color:#8b93a7; margin:8px 0 0; line-height:1.4; }
+
+.pbi-card-viz { height:100%; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center; }
+.pbi-card-value { font-size:1.6rem; font-weight:800; color:var(--accent); }
+.pbi-card-label { font-size:12px; color:var(--ink-muted); margin-top:4px; }
+.pbi-card-delta { font-size:12px; color:var(--green); font-weight:700; margin-top:4px; }
+.pbi-dynamic-body { height:100%; min-height:0; }
+.pbi-icon-btn.pbi-danger:hover { color:#ff6b6b; }
+
+.brand-mark.brand-logo svg { width:100%; height:100%; display:block; }
+
+@media (max-width: 992px) {
+  .pbi-workspace { grid-template-columns:1fr; }
+  .pbi-viz-pane { position:relative; top:auto; max-height:280px; order:-1; }
+}
