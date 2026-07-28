@@ -119,7 +119,7 @@ def _add_cache_headers(response):
 _analysis_cache = {}
 
 # 前端资源版本：每次发版递增，避免老账号浏览器缓存旧 UI
-UI_BUILD = '20260716d'
+UI_BUILD = '20260728b'
 
 
 @app.context_processor
@@ -129,6 +129,7 @@ def inject_ui_build():
 _PUBLIC_PATHS = {
     '/login', '/api/auth/login', '/api/auth/register', '/api/auth/roles',
     '/favicon.ico', '/manifest.webmanifest', '/sw.js',
+    '/downloads', '/api/downloads', '/api/downloads/harmony-guide',
 }
 
 
@@ -137,7 +138,10 @@ def inject_user_ui():
     user = g.get('current_user')
     if not user:
         return {}
-    from modules.roles import get_user_features, get_role_label, parse_preferences, get_user_company
+    from modules.roles import (
+        get_user_features, get_role_label, parse_preferences,
+        get_user_company, is_company_admin,
+    )
     prefs = parse_preferences(user.get('preferences'))
     return {
         'user_theme': user.get('theme') or 'default',
@@ -146,6 +150,7 @@ def inject_user_ui():
         'user_features': get_user_features(user),
         'user_accent': prefs.get('accent_color'),
         'user_company': get_user_company(user),
+        'is_company_admin': is_company_admin(user),
     }
 
 
@@ -159,6 +164,107 @@ def _safe_reply(result: dict) -> str:
     if not isinstance(reply, str):
         reply = str(reply)
     return reply.encode('utf-8', errors='replace').decode('utf-8')
+
+
+def company_admin_required(view):
+    """仅系统管理员（技术岗）可访问。"""
+    from functools import wraps
+
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        from modules.roles import is_company_admin, get_user_company
+        user = g.get('current_user')
+        if not user:
+            if request.path.startswith('/api/'):
+                return jsonify({'success': False, 'error': '请先登录', 'login_required': True}), 401
+            return redirect(url_for('login_page'))
+        if not get_user_company(user):
+            if request.path.startswith('/api/'):
+                return jsonify({'success': False, 'error': '请先填写公司名称'}), 403
+            return redirect(url_for('profile_page'))
+        if not is_company_admin(user):
+            if request.path.startswith('/api/'):
+                return jsonify({'success': False, 'error': '仅系统管理员可访问'}), 403
+            return redirect(url_for('profile_page'))
+        return view(*args, **kwargs)
+
+    return wrapped
+
+
+def feature_required(feature: str):
+    """要求当前用户具备指定功能权限。"""
+    from functools import wraps
+
+    def decorator(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            from modules.roles import feature_enabled, ALL_FEATURES
+            user = g.get('current_user')
+            if not user:
+                if request.path.startswith('/api/'):
+                    return jsonify({'success': False, 'error': '请先登录', 'login_required': True}), 401
+                return redirect(url_for('login_page'))
+            if feature not in ALL_FEATURES or not feature_enabled(user, feature):
+                label = ALL_FEATURES.get(feature, feature)
+                if request.path.startswith('/api/'):
+                    return jsonify({'success': False, 'error': f'无权限访问：{label}'}), 403
+                return redirect(url_for('index'))
+            return view(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
+# 路径前缀 → 功能权限（长前缀优先）
+_FEATURE_PATH_RULES: list[tuple[str, str]] = [
+    ('/finance/vouchers', 'vouchers'),
+    ('/api/finance/vouchers', 'vouchers'),
+    ('/finance/receivables', 'receivables'),
+    ('/finance/payables', 'payables'),
+    ('/finance/invoices', 'invoices'),
+    ('/api/finance/invoices', 'invoices'),
+    ('/finance/travel-expenses', 'travel_expense_audit'),
+    ('/api/finance/travel-expenses', 'travel_expense_audit'),
+    ('/finance/reconciliation', 'reconciliation'),
+    ('/api/finance/bank', 'reconciliation'),
+    ('/finance', 'finance'),
+    ('/api/finance/overview', 'finance'),
+    ('/api/finance/accounts', 'finance'),
+    ('/api/finance/versions', 'finance'),
+    ('/workflow/approvals', 'approvals'),
+    ('/api/workflow/approvals', 'approvals'),
+    ('/workflow/tasks', 'tasks'),
+    ('/api/workflow/tasks', 'tasks'),
+    ('/dashboard', 'dashboard'),
+    ('/analysis', 'analysis'),
+    ('/report', 'report'),
+    ('/agent', 'agent'),
+    ('/models', 'agent'),
+]
+
+
+def _feature_for_path(path: str) -> str | None:
+    for prefix, feature in _FEATURE_PATH_RULES:
+        if path == prefix or path.startswith(prefix + '/'):
+            return feature
+        if prefix.startswith('/api/') and path.startswith(prefix):
+            return feature
+    return None
+
+
+def _path_features_allowed(user: dict, path: str) -> bool:
+    """判断路径是否允许；往来伙伴 API 在应收/应付/财务任一权限下可用。"""
+    from modules.roles import feature_enabled
+    if path.startswith('/api/finance/partners'):
+        return any(
+            feature_enabled(user, f)
+            for f in ('receivables', 'payables', 'finance', 'invoices')
+        )
+    feature = _feature_for_path(path)
+    if not feature:
+        return True
+    return feature_enabled(user, feature)
 
 
 @app.before_request
@@ -177,6 +283,15 @@ def _load_current_user():
         if path.startswith('/api/'):
             return jsonify({'success': False, 'error': '请先登录', 'login_required': True}), 401
         return redirect(url_for('login_page', next=path))
+
+    # 业务路径功能权限（与侧栏同一套 key）
+    if not _path_features_allowed(g.current_user, path):
+        from modules.roles import ALL_FEATURES
+        feature = _feature_for_path(path) or 'finance'
+        label = ALL_FEATURES.get(feature, feature)
+        if path.startswith('/api/'):
+            return jsonify({'success': False, 'error': f'无权限访问：{label}'}), 403
+        return redirect(url_for('index'))
 
 
 # ============================================================
@@ -361,6 +476,11 @@ def invoices_page():
     return render_template('finance_invoices.html')
 
 
+@app.route('/finance/travel-expenses')
+def travel_expenses_page():
+    return render_template('finance_travel_expenses.html')
+
+
 @app.route('/finance/reconciliation')
 def reconciliation_page():
     return render_template('finance_reconciliation.html')
@@ -414,6 +534,52 @@ def history_page():
 @app.route('/profile')
 def profile_page():
     return render_template('profile.html')
+
+
+@app.route('/downloads')
+def downloads_page():
+    return render_template('downloads.html')
+
+
+@app.route('/api/downloads')
+def api_downloads_list():
+    folder = os.path.join(app.root_path, 'static', 'downloads')
+    os.makedirs(folder, exist_ok=True)
+    files = []
+    for name in sorted(os.listdir(folder)):
+        path = os.path.join(folder, name)
+        if not os.path.isfile(path) or name.startswith('.'):
+            continue
+        lower = name.lower()
+        if lower.endswith(('.exe', '.msi')) or 'windows' in lower or 'win' in lower:
+            platform = 'win'
+        elif 'macos' in lower or 'darwin' in lower or lower.endswith(('.dmg', '.pkg')):
+            platform = 'mac'
+        elif lower.endswith('.apk') or 'android' in lower:
+            platform = 'android'
+        elif lower.endswith(('.appimage', '.deb', '.rpm')) or 'linux' in lower:
+            platform = 'linux'
+        elif lower.endswith(('.hap',)):
+            platform = 'harmony'
+        else:
+            platform = 'other'
+        size = os.path.getsize(path)
+        size_s = f'{size / 1024 / 1024:.1f} MB' if size >= 1024 * 1024 else f'{size / 1024:.0f} KB'
+        files.append({
+            'name': name,
+            'platform': platform,
+            'size': size_s,
+            'url': url_for('static', filename=f'downloads/{name}'),
+        })
+    return jsonify({'success': True, 'files': files})
+
+
+@app.route('/api/downloads/harmony-guide')
+def api_harmony_guide():
+    guide = os.path.join(app.root_path, 'native', 'harmony', 'README.md')
+    if os.path.isfile(guide):
+        return send_file(guide, mimetype='text/markdown; charset=utf-8')
+    return '见 native/harmony/README.md', 200, {'Content-Type': 'text/plain; charset=utf-8'}
 
 
 @app.route('/chat')
@@ -918,6 +1084,75 @@ def api_finance_invoice_pay(invoice_id):
     data = request.get_json(silent=True) or {}
     record_invoice_payment(uid, invoice_id, float(data.get('amount', 0)))
     return jsonify({'success': True})
+
+
+@app.route('/api/finance/travel-expenses', methods=['GET', 'POST'])
+def api_finance_travel_expenses():
+    from modules.enterprise_db import list_travel_claims, create_travel_claim, TRAVEL_CATEGORIES
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    if request.method == 'GET':
+        status = request.args.get('status')
+        return jsonify({
+            'success': True,
+            'claims': list_travel_claims(uid, status),
+            'categories': TRAVEL_CATEGORIES,
+        })
+    data = request.get_json(silent=True) or {}
+    if not (data.get('traveler') or '').strip():
+        return jsonify({'success': False, 'error': '请填写出差人'})
+    if not (data.get('lines') or data.get('amount')):
+        return jsonify({'success': False, 'error': '请填写费用明细或金额'})
+    try:
+        cid = create_travel_claim(uid, data)
+    except Exception as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    from modules.enterprise_db import get_travel_claim, save_doc_version
+    claim = get_travel_claim(uid, cid)
+    if claim:
+        save_doc_version(uid, 'travel_claim', cid, claim, message='创建差旅报销单', author_id=uid)
+    return jsonify({'success': True, 'claim_id': cid, 'claim': claim})
+
+
+@app.route('/api/finance/travel-expenses/<int:claim_id>')
+def api_finance_travel_expense_detail(claim_id):
+    from modules.enterprise_db import get_travel_claim
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    claim = get_travel_claim(uid, claim_id)
+    if not claim:
+        return jsonify({'success': False, 'error': '报销单不存在'}), 404
+    return jsonify({'success': True, 'claim': claim})
+
+
+@app.route('/api/finance/travel-expenses/<int:claim_id>/audit', methods=['POST'])
+def api_finance_travel_expense_audit(claim_id):
+    from modules.enterprise_db import run_travel_claim_audit
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    try:
+        result = run_travel_claim_audit(uid, claim_id)
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    return jsonify({'success': True, **result})
+
+
+@app.route('/api/finance/travel-expenses/<int:claim_id>/status', methods=['POST'])
+def api_finance_travel_expense_status(claim_id):
+    from modules.enterprise_db import update_travel_claim_status, get_travel_claim
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    data = request.get_json(silent=True) or {}
+    status = (data.get('status') or '').strip()
+    try:
+        update_travel_claim_status(uid, claim_id, status, data.get('auditor_note'))
+    except ValueError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    return jsonify({'success': True, 'claim': get_travel_claim(uid, claim_id)})
 
 
 @app.route('/api/finance/bank/accounts')
@@ -1678,11 +1913,39 @@ def api_profile_update_company():
     user = g.current_user
     update_user_profile(user['id'], company=company)
     linked = auto_friend_same_company(user['id'], company)
+    # 刷新 g.current_user 公司字段
+    user['company'] = company
     return jsonify({
         'success': True,
         'company': company,
         'auto_friends': linked,
         'need_company': user.get('role') in PROFESSIONAL_ROLES,
+    })
+
+
+@app.route('/api/profile/role', methods=['POST'])
+def api_profile_update_role():
+    """本人自选岗位；升为系统管理员须已填写公司。"""
+    data = request.get_json(silent=True) or {}
+    role = (data.get('role') or '').strip()
+    from modules.roles import ROLES, PROFESSIONAL_ROLES, get_user_company, get_role_label
+    from modules.database import update_user_profile, get_user_by_id
+    if role not in ROLES:
+        return jsonify({'success': False, 'error': '无效角色'})
+    user = g.current_user
+    company = get_user_company(user)
+    if role in PROFESSIONAL_ROLES and not company:
+        return jsonify({'success': False, 'error': '该岗位须先填写公司名称'})
+    update_user_profile(user['id'], role=role)
+    session['user_role'] = role
+    refreshed = get_user_by_id(user['id'])
+    if refreshed:
+        g.current_user = refreshed
+    return jsonify({
+        'success': True,
+        'role': role,
+        'role_label': get_role_label(role),
+        'is_company_admin': role == 'company_admin' and bool(company),
     })
 
 
@@ -1713,6 +1976,125 @@ def api_profile_stats():
         'avg_score': avg_score,
         'records': records[:10],
     })
+
+
+# ============================================================
+# 公司管理后台
+# ============================================================
+
+@app.route('/company/admin')
+@company_admin_required
+def company_admin_page():
+    from modules.roles import ROLES, ALL_FEATURES, ROLE_DEFAULTS, FEATURE_GROUPS, get_user_company
+    return render_template(
+        'company_admin.html',
+        roles=ROLES,
+        features=ALL_FEATURES,
+        feature_groups=FEATURE_GROUPS,
+        role_defaults={k: v['features'] for k, v in ROLE_DEFAULTS.items()},
+        company_name=get_user_company(g.current_user),
+    )
+
+
+@app.route('/api/company/members')
+@company_admin_required
+def api_company_members():
+    from modules.database import list_company_members, get_company_enabled_features
+    from modules.roles import ROLES, ALL_FEATURES, ROLE_DEFAULTS, get_user_company, FEATURE_GROUPS
+    company = get_user_company(g.current_user)
+    members = list_company_members(g.current_user['id'])
+    return jsonify({
+        'success': True,
+        'company': company,
+        'members': members,
+        'roles': ROLES,
+        'features': ALL_FEATURES,
+        'feature_groups': FEATURE_GROUPS,
+        'company_features': get_company_enabled_features(company),
+        'role_defaults': {k: v['features'] for k, v in ROLE_DEFAULTS.items()},
+    })
+
+
+@app.route('/api/company/overview')
+@company_admin_required
+def api_company_overview():
+    from modules.database import get_company_overview
+    data = get_company_overview(g.current_user['id'])
+    if not data:
+        return jsonify({'success': False, 'error': '无法读取公司数据'}), 403
+    return jsonify({'success': True, **data})
+
+
+@app.route('/api/company/features', methods=['GET', 'PUT', 'POST'])
+@company_admin_required
+def api_company_features():
+    from modules.database import get_company_enabled_features, set_company_enabled_features
+    from modules.roles import ALL_FEATURES, FEATURE_GROUPS, get_user_company
+    company = get_user_company(g.current_user)
+    if request.method == 'GET':
+        enabled = get_company_enabled_features(company)
+        return jsonify({
+            'success': True,
+            'company': company,
+            'features': ALL_FEATURES,
+            'feature_groups': FEATURE_GROUPS,
+            'enabled_features': enabled,
+        })
+    data = request.get_json(silent=True) or {}
+    raw = data.get('enabled_features')
+    if not isinstance(raw, dict):
+        return jsonify({'success': False, 'error': '请提交 enabled_features 对象'}), 400
+    ok, msg, enabled = set_company_enabled_features(
+        company, raw, updated_by=g.current_user['id'],
+    )
+    if not ok:
+        return jsonify({'success': False, 'error': msg}), 400
+    return jsonify({
+        'success': True,
+        'message': msg,
+        'enabled_features': enabled,
+        'features': ALL_FEATURES,
+        'feature_groups': FEATURE_GROUPS,
+    })
+
+
+@app.route('/api/company/members/<int:member_id>', methods=['PATCH', 'POST'])
+@company_admin_required
+def api_company_member_update(member_id: int):
+    data = request.get_json(silent=True) or {}
+    from modules.database import admin_update_member
+    role = data.get('role') if 'role' in data else None
+    overrides = data.get('feature_overrides') if 'feature_overrides' in data else None
+    ok, msg, member = admin_update_member(
+        admin_id=g.current_user['id'],
+        target_id=member_id,
+        role=role,
+        feature_overrides=overrides,
+    )
+    if not ok:
+        return jsonify({'success': False, 'error': msg}), 400
+    # 若改的是自己，刷新 session 角色
+    if member and member.get('is_self'):
+        session['user_role'] = member.get('role')
+        from modules.database import get_user_by_id
+        refreshed = get_user_by_id(member_id)
+        if refreshed:
+            g.current_user = refreshed
+    return jsonify({'success': True, 'message': msg, 'member': member})
+
+
+@app.route('/api/company/members/<int:member_id>/reset-features', methods=['POST'])
+@company_admin_required
+def api_company_member_reset_features(member_id: int):
+    from modules.database import admin_update_member
+    ok, msg, member = admin_update_member(
+        admin_id=g.current_user['id'],
+        target_id=member_id,
+        clear_overrides=True,
+    )
+    if not ok:
+        return jsonify({'success': False, 'error': msg}), 400
+    return jsonify({'success': True, 'message': msg, 'member': member})
 
 
 # ============================================================

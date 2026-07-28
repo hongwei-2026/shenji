@@ -16,7 +16,9 @@
 <div class="auth-page">
   <div class="auth-card auth-card-wide">
     <div class="auth-brand">
-      <span class="brand-mark">审</span>
+      <span class="brand-mark brand-logo" style="width:56px;height:56px;margin:0 auto 12px;display:grid;">
+        <img src="{{ url_for('static', filename='img/logo.svg') }}?v={{ ui_build|default('13') }}" alt="Logo" width="56" height="56">
+      </span>
       <h1>财务审计工作台</h1>
       <p>登录或注册，选择职业模式与界面风格</p>
     </div>

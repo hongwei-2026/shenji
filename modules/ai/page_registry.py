@@ -7,6 +7,7 @@ PAGES: dict[str, dict] = {
     'receivables': {'url': '/finance/receivables', 'label': '应收账款', 'desc': '客户往来与账龄'},
     'payables': {'url': '/finance/payables', 'label': '应付账款', 'desc': '供应商往来'},
     'invoices': {'url': '/finance/invoices', 'label': '发票管理', 'desc': '应收/应付发票'},
+    'travel_expense_audit': {'url': '/finance/travel-expenses', 'label': '出差费用报销审计', 'desc': '差旅报销单录入与合规审计'},
     'reconciliation': {'url': '/finance/reconciliation', 'label': '银行对账', 'desc': '银行流水与账面核对'},
     'approvals': {'url': '/workflow/approvals', 'label': '审批中心', 'desc': '飞书式审批流'},
     'tasks': {'url': '/workflow/tasks', 'label': '任务中心', 'desc': '任务与@提醒'},
@@ -22,6 +23,7 @@ PAGES: dict[str, dict] = {
     'chat': {'url': '/chat', 'label': '消息协作', 'desc': '飞书式即时消息与文件'},
     'agent': {'url': '/agent', 'label': 'AI Agent', 'desc': '智能体工作台'},
     'profile': {'url': '/profile', 'label': '个人空间', 'desc': '账号、好友、主题设置'},
+    'company_admin': {'url': '/company/admin', 'label': '系统管理', 'desc': '技术后台：公司数据概览、开通功能、成员权限'},
     'search': {'url': '/search', 'label': '全文检索', 'desc': '搜索知识与历史'},
 }
 

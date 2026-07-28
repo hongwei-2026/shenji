@@ -40,7 +40,9 @@ body.app-body { margin:0; background:var(--paper); color:var(--ink); font-family
 .app-shell { display:flex; min-height:100vh; }
 .app-sidebar { position:fixed; top:0; left:0; width:var(--sidebar-w); height:100vh; background:var(--sidebar); color:#c8cdd8; display:flex; flex-direction:column; z-index:1040; border-right:2px solid var(--line-strong); }
 .sidebar-brand { display:flex; align-items:center; gap:12px; padding:22px 20px 18px; border-bottom:1px solid rgba(255,255,255,.08); }
-.brand-mark { width:38px; height:38px; display:grid; place-items:center; background:var(--accent); color:#fff; font-weight:700; font-size:18px; flex-shrink:0; }
+.brand-mark { width:38px; height:38px; display:grid; place-items:center; background:var(--accent); color:#fff; font-weight:700; font-size:18px; flex-shrink:0; overflow:hidden; }
+.brand-mark.brand-logo { background:transparent; padding:0; border:2px solid #111; box-shadow:2px 2px 0 rgba(255,107,0,.45); }
+.brand-mark.brand-logo img { width:100%; height:100%; object-fit:cover; display:block; }
 .brand-text strong { display:block; color:#f0f2f6; font-size:14px; font-weight:600; line-height:1.3; }
 .brand-text small { display:block; font-size:10px; color:#7a8499; letter-spacing:.06em; text-transform:uppercase; margin-top:2px; }
 .sidebar-nav { flex:1; overflow-y:auto; padding:12px 10px; }
@@ -215,9 +217,32 @@ body.app-body { margin:0; background:var(--paper); color:var(--ink); font-family
 #editorTable tr:hover td { background:var(--accent-soft)!important; }
 #editorTable tr.row-selected td { background:var(--accent-soft)!important; }
 
-/* ── AI floating button ── */
-.ai-floating-btn { position:fixed; bottom:24px; right:24px; z-index:9998; width:50px; height:50px; background:var(--ink); color:#e8ebf0; display:flex; align-items:center; justify-content:center; font-size:1.25rem; cursor:grab; box-shadow:var(--shadow-md); border:2px solid var(--accent); transition:transform .15s; user-select:none; }
-.ai-floating-btn:hover { transform:translateY(-2px); }
+/* ── AI floating button (anime face) ── */
+.ai-floating-btn { position:fixed; bottom:24px; right:24px; z-index:9998; width:64px; height:64px; background:transparent; color:#e8ebf0; display:flex; align-items:center; justify-content:center; font-size:1.25rem; cursor:grab; box-shadow:none; border:none; transition:transform .15s; user-select:none; padding:0; }
+.ai-floating-btn:hover { transform:translateY(-3px) scale(1.04); }
+.ai-floating-btn.dragging { cursor:grabbing; transform:scale(1.06); }
+.ai-anime-face { position:relative; width:58px; height:58px; border-radius:50%; background:linear-gradient(145deg,#ff8a3d,#ff6b00); border:2.5px solid #111; box-shadow:3px 3px 0 #111; overflow:visible; }
+.ai-anime-face .ai-ear { position:absolute; top:-6px; width:14px; height:16px; background:#ff6b00; border:2px solid #111; border-radius:4px 4px 0 0; z-index:0; }
+.ai-anime-face .ai-ear.l { left:6px; transform:rotate(-18deg); }
+.ai-anime-face .ai-ear.r { right:6px; transform:rotate(18deg); }
+.ai-anime-face .ai-eye { position:absolute; top:16px; width:14px; height:16px; background:#fff; border:2px solid #111; border-radius:50%; overflow:hidden; z-index:2; }
+.ai-anime-face .ai-eye.l { left:10px; }
+.ai-anime-face .ai-eye.r { right:10px; }
+.ai-anime-face .ai-pupil { position:absolute; left:50%; top:50%; width:7px; height:7px; margin:-3.5px 0 0 -3.5px; background:#111; border-radius:50%; transition:transform .05s linear; }
+.ai-anime-face .ai-pupil::after { content:''; position:absolute; top:1px; right:1px; width:2px; height:2px; background:#fff; border-radius:50%; }
+.ai-anime-face .ai-mouth { position:absolute; bottom:10px; left:50%; width:14px; height:7px; margin-left:-7px; border:2px solid #111; border-top:none; border-radius:0 0 10px 10px; z-index:2; }
+.ai-anime-face .ai-blush { position:absolute; top:30px; width:8px; height:4px; background:#ffb4a0; border-radius:50%; opacity:.75; z-index:1; }
+.ai-anime-face .ai-blush.l { left:4px; }
+.ai-anime-face .ai-blush.r { right:4px; }
+.ai-anime-face .ai-badge { position:absolute; right:-4px; bottom:-2px; width:18px; height:18px; background:#ffe566; border:2px solid #111; border-radius:50%; font-size:10px; font-weight:800; color:#111; display:grid; place-items:center; z-index:3; }
+.ai-anime-face.ai-idle { animation:aiBob 2.4s ease-in-out infinite; }
+.ai-anime-face.ai-blink .ai-eye { height:3px; top:22px; }
+.ai-anime-face.ai-blink .ai-pupil { opacity:0; }
+@keyframes aiBob { 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(-4px); } }
+.ai-chat-header .ai-mini-face { display:inline-flex; width:22px; height:22px; border-radius:50%; background:linear-gradient(145deg,#ff8a3d,#ff6b00); border:1.5px solid #ffe566; vertical-align:-5px; margin-right:4px; position:relative; }
+.ai-chat-header .ai-mini-face::before,.ai-chat-header .ai-mini-face::after { content:''; position:absolute; top:7px; width:4px; height:4px; background:#111; border-radius:50%; }
+.ai-chat-header .ai-mini-face::before { left:4px; }
+.ai-chat-header .ai-mini-face::after { right:4px; }
 .ai-chat-window { position:fixed; bottom:88px; right:24px; z-index:9999; width:380px; height:480px; background:#fff; border:2px solid var(--ink); box-shadow:var(--shadow-md); display:flex; flex-direction:column; overflow:hidden; animation:aiSlideUp .3s ease; }
 @keyframes aiSlideUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
 .ai-chat-header { background:var(--ink); color:#e8ebf0; padding:12px 16px; display:flex; justify-content:space-between; align-items:center; font-weight:700; font-size:13px; text-transform:uppercase; letter-spacing:.5px; cursor:move; }
@@ -289,6 +314,45 @@ body.app-body { margin:0; background:var(--paper); color:var(--ink); font-family
 /* ── Loading ── */
 .loading-state { text-align:center; padding:48px 20px; color:var(--ink-muted); }
 .loading-state .spinner-border { width:2rem; height:2rem; color:var(--accent); border-width:2px; }
+.loading-state.anime-loading { position:relative; }
+
+/* ── Anime loader / mascot spin ── */
+.anime-mascot-spin { position:relative; width:56px; height:56px; margin:0 auto; }
+.anime-coin { width:48px; height:48px; margin:4px auto 0; border-radius:50%; background:linear-gradient(145deg,#ffe566,#ffb800); border:2.5px solid #111; box-shadow:3px 3px 0 #111; display:grid; place-items:center; font-weight:800; font-size:20px; color:#111; animation:coinFlip 1.1s ease-in-out infinite; }
+.anime-spark { position:absolute; width:6px; height:6px; background:var(--accent); border:1.5px solid #111; animation:sparkPop 1s ease-in-out infinite; }
+.anime-spark.s1 { top:0; left:8px; animation-delay:0s; }
+.anime-spark.s2 { top:6px; right:4px; animation-delay:.25s; background:#ffe566; }
+.anime-spark.s3 { bottom:4px; left:50%; animation-delay:.5s; background:#7dd3fc; }
+@keyframes coinFlip { 0%,100%{ transform:rotateY(0) translateY(0); } 40%{ transform:rotateY(180deg) translateY(-8px); } 70%{ transform:rotateY(360deg) translateY(2px); } }
+@keyframes sparkPop { 0%,100%{ transform:scale(.4) rotate(0); opacity:.3; } 50%{ transform:scale(1.2) rotate(20deg); opacity:1; } }
+
+.anime-page-loader { position:fixed; inset:0; z-index:10050; background:rgba(255,253,247,.72); display:none; align-items:center; justify-content:center; backdrop-filter:blur(2px); }
+.anime-page-loader.show { display:flex; }
+.anime-loader-card { background:#fff; border:2.5px solid #111; box-shadow:4px 4px 0 #111; padding:28px 36px; text-align:center; min-width:200px; }
+.anime-loader-text { margin-top:12px; font-weight:700; font-size:13px; letter-spacing:.06em; text-transform:uppercase; }
+.anime-loader-bar { margin-top:14px; height:8px; background:var(--paper); border:2px solid #111; overflow:hidden; }
+.anime-loader-bar span { display:block; height:100%; width:40%; background:var(--accent); animation:loaderSlide 1s ease-in-out infinite; }
+@keyframes loaderSlide { 0%{ transform:translateX(-100%); } 100%{ transform:translateX(280%); } }
+
+.anime-top-bar { position:fixed; top:0; left:0; height:3px; width:0; background:linear-gradient(90deg,var(--accent),#ffe566,var(--accent)); z-index:10060; opacity:0; transition:opacity .2s; pointer-events:none; }
+body.anime-fetching .anime-top-bar { opacity:1; width:100%; animation:topBarPulse 1.2s ease-in-out infinite; }
+@keyframes topBarPulse { 0%{ transform:scaleX(0); transform-origin:left; } 50%{ transform:scaleX(1); transform-origin:left; } 51%{ transform-origin:right; } 100%{ transform:scaleX(0); transform-origin:right; } }
+
+/* ── Finance drag & drop ── */
+.finance-drop-overlay { position:fixed; inset:0; z-index:10040; background:rgba(17,17,17,.55); display:none; align-items:center; justify-content:center; pointer-events:none; }
+.finance-drop-overlay.show { display:flex; }
+.finance-drop-card { pointer-events:none; background:#fff; border:3px dashed var(--accent); box-shadow:4px 4px 0 #111; padding:36px 48px; text-align:center; max-width:420px; animation:dropPulse .9s ease-in-out infinite; }
+.finance-drop-card h5 { font-weight:800; margin:8px 0 6px; }
+.finance-drop-card p { margin:0; color:var(--ink-muted); font-size:13px; }
+.finance-drop-mascot { font-size:2rem; animation:aiBob 1.2s ease-in-out infinite; }
+@keyframes dropPulse { 0%,100%{ transform:scale(1); } 50%{ transform:scale(1.03); } }
+
+#financeDragBoard .fin-drag-item { transition:box-shadow .15s, transform .15s; }
+#financeDragBoard .fin-drag-item.fin-dragging { opacity:.55; transform:rotate(1deg) scale(1.01); box-shadow:4px 4px 0 var(--accent); }
+#financeDragBoard .fin-drag-item.fin-drag-over { outline:2px dashed var(--accent); outline-offset:2px; }
+.fin-drag-handle { display:inline-flex; align-items:center; gap:4px; color:var(--ink-muted); font-size:12px; cursor:grab; user-select:none; }
+.fin-drag-handle:active { cursor:grabbing; }
+.nav-item.nav-dragging { opacity:.45; background:var(--sidebar-active); }
 
 /* ── Misc ── */
 .text-ok { color:var(--ok)!important; }
@@ -448,8 +512,8 @@ body.page-style-spacious .app-content { padding:36px 40px; max-width:1400px; }
 }
 
 /* ── 悬浮助手按钮 ── */
-.ai-floating-btn { background:var(--ink); border:2px solid var(--accent); }
-.ai-floating-btn:hover { background:var(--accent); border-color:var(--accent); }
+.ai-floating-btn { background:transparent; border:none; }
+.ai-floating-btn:hover { background:transparent; border:none; }
 
 /* ── toast 彩色 ── */
 .app-toast { border-left:5px solid var(--accent); }

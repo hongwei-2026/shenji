@@ -1,0 +1,43 @@
+{
+  "name": "shenji-desktop",
+  "version": "1.0.0",
+  "description": "智能财务系统桌面客户端",
+  "main": "main.js",
+  "author": "shenji",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win portable zip --x64",
+    "dist:linux": "electron-builder --linux AppImage --x64"
+  },
+  "build": {
+    "appId": "com.shenji.finance",
+    "productName": "智能财务系统",
+    "directories": { "output": "../dist/desktop", "buildResources": "build" },
+    "files": ["main.js", "preload.js", "package.json"],
+    "asar": true,
+    "win": {
+      "target": ["portable", "zip"],
+      "icon": "build/icon.png",
+      "artifactName": "智能财务系统-${version}-Windows-${arch}.${ext}"
+    },
+    "portable": {
+      "artifactName": "智能财务系统-${version}-Windows-绿色版.exe"
+    },
+    "mac": {
+      "target": ["zip"],
+      "icon": "build/icon.png",
+      "identity": null,
+      "artifactName": "智能财务系统-${version}-macOS-${arch}.zip"
+    },
+    "linux": {
+      "target": ["AppImage"],
+      "icon": "build/icon.png",
+      "artifactName": "智能财务系统-${version}-Linux.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}

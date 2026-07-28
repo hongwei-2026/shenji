@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 ROLES: dict[str, str] = {
+    'company_admin': '系统管理员',
     'audit_manager': '审计经理',
     'finance_director': '财务主管',
     'accountant': '会计',
@@ -17,7 +18,7 @@ ROLES: dict[str, str] = {
 
 # 需填写公司、同公司自动好友的职业
 PROFESSIONAL_ROLES = [
-    'audit_manager', 'finance_director', 'accountant', 'auditor',
+    'company_admin', 'audit_manager', 'finance_director', 'accountant', 'auditor',
     'cashier', 'tax_assistant', 'consultant',
 ]
 CUSTOMIZABLE_ROLES = ['normal_user', 'student']
@@ -44,6 +45,7 @@ ALL_FEATURES = {
     'payables': '应付账款',
     'invoices': '发票管理',
     'reconciliation': '银行对账',
+    'travel_expense_audit': '出差费用报销审计',
     'approvals': '审批中心',
     'tasks': '任务中心',
     'upload': '数据导入',
@@ -69,11 +71,18 @@ def _feats(*keys: str) -> dict[str, bool]:
 
 # 真实岗位默认权限（职业角色不可在注册时随意勾选）
 ROLE_DEFAULTS: dict[str, dict] = {
+    # 系统管理员（技术岗）：管成员权限与模型/Agent，不含财务核算与审计业务
+    'company_admin': {
+        'theme': 'dark', 'page_style': 'compact',
+        'features': _feats(
+            'chat', 'video', 'collab', 'search', 'ai', 'agent',
+        ),
+    },
     # 审计经理：审计全流程 + 审批任务 + 协作；不负责日常出纳/开票录入
     'audit_manager': {
         'theme': 'slate', 'page_style': 'classic',
         'features': _feats(
-            'finance', 'receivables', 'payables', 'invoices',
+            'finance', 'receivables', 'payables', 'invoices', 'travel_expense_audit',
             'approvals', 'tasks',
             'upload', 'edit', 'preview', 'dashboard', 'analysis', 'report', 'history',
             'chat', 'video', 'collab', 'search', 'ai', 'agent',
@@ -84,6 +93,7 @@ ROLE_DEFAULTS: dict[str, dict] = {
         'theme': 'ocean', 'page_style': 'classic',
         'features': _feats(
             'finance', 'vouchers', 'receivables', 'payables', 'invoices', 'reconciliation',
+            'travel_expense_audit',
             'approvals', 'tasks',
             'upload', 'edit', 'preview', 'history',
             'chat', 'video', 'collab', 'search', 'ai', 'agent',
@@ -93,7 +103,7 @@ ROLE_DEFAULTS: dict[str, dict] = {
     'accountant': {
         'theme': 'default', 'page_style': 'classic',
         'features': _feats(
-            'finance', 'vouchers', 'receivables', 'payables', 'invoices',
+            'finance', 'vouchers', 'receivables', 'payables', 'invoices', 'travel_expense_audit',
             'upload', 'edit', 'preview', 'history',
             'chat', 'video', 'collab', 'search', 'ai',
         ),
@@ -102,7 +112,7 @@ ROLE_DEFAULTS: dict[str, dict] = {
     'auditor': {
         'theme': 'forest', 'page_style': 'classic',
         'features': _feats(
-            'finance', 'receivables', 'payables', 'invoices',
+            'finance', 'receivables', 'payables', 'invoices', 'travel_expense_audit',
             'upload', 'edit', 'preview', 'dashboard', 'analysis', 'report', 'history',
             'chat', 'video', 'collab', 'search', 'ai', 'agent',
         ),
@@ -152,6 +162,7 @@ ROLE_DEFAULTS: dict[str, dict] = {
 }
 
 ROLE_HINTS = {
+    'company_admin': '技术人员岗位：管理本公司成员权限与模型/Agent，不含财务、凭证、审计等业务菜单；须填写公司。',
     'audit_manager': '侧重审计计划、规则检测、报告与审批，不含日常开票/对账录入。',
     'finance_director': '侧重财务核算、凭证与审批管理，不含深度审计报告签发。',
     'accountant': '侧重凭证、往来与发票处理，不含审批中心与审计报告。',
@@ -218,16 +229,47 @@ def resolve_registration_profile(data: dict) -> dict:
     }
 
 
+def get_feature_overrides(user: dict | None) -> dict[str, bool]:
+    """管理员写入的功能覆盖（仅 ALL_FEATURES 内的键）。"""
+    if not user:
+        return {}
+    prefs = parse_preferences(user.get('preferences'))
+    raw = prefs.get('feature_overrides') or {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, bool] = {}
+    for key, val in raw.items():
+        if key in ALL_FEATURES:
+            out[key] = bool(val)
+    return out
+
+
 def get_user_features(user: dict | None) -> dict[str, bool]:
     """返回当前用户可见功能。
 
-    一律按角色 ROLE_DEFAULTS 生效，避免老账号 preferences 全开导致各职业菜单相同。
-    普通用户/学生仅可自定义主题与版式，不可随意打开企业核算全模块。
+    以 ROLE_DEFAULTS[role] 为底，再合并 preferences.feature_overrides。
+    非系统管理员再与公司已开通功能取交集（公司未开通的功能一律关闭）。
     """
     if not user:
         return {k: False for k in ALL_FEATURES}
     role = user.get('role') or 'normal_user'
-    return dict(ROLE_DEFAULTS.get(role, ROLE_DEFAULTS['normal_user'])['features'])
+    features = dict(ROLE_DEFAULTS.get(role, ROLE_DEFAULTS['normal_user'])['features'])
+    overrides = get_feature_overrides(user)
+    if overrides:
+        features.update(overrides)
+    # 系统管理员保持技术岗菜单，不受公司业务功能包限制
+    if role != 'company_admin':
+        company = get_user_company(user)
+        if company:
+            try:
+                from modules.database import get_company_enabled_features
+                enabled = get_company_enabled_features(company)
+                for key in ALL_FEATURES:
+                    if not enabled.get(key, True):
+                        features[key] = False
+            except Exception:
+                pass
+    return features
 
 
 def feature_enabled(user: dict | None, feature: str) -> bool:
@@ -242,3 +284,30 @@ def get_user_company(user: dict | None) -> str:
         return company
     prefs = parse_preferences(user.get('preferences'))
     return (prefs.get('company') or '').strip()
+
+
+def is_company_admin(user: dict | None) -> bool:
+    if not user:
+        return False
+    return (user.get('role') or '') == 'company_admin' and bool(get_user_company(user))
+
+
+def same_company(user_a: dict | None, user_b: dict | None) -> bool:
+    ca = get_user_company(user_a)
+    cb = get_user_company(user_b)
+    return bool(ca) and ca == cb
+
+
+def role_default_features(role: str | None) -> dict[str, bool]:
+    key = role if role in ROLE_DEFAULTS else 'normal_user'
+    return dict(ROLE_DEFAULTS[key]['features'])
+
+
+# 系统管理页展示用的功能分组
+FEATURE_GROUPS: dict[str, list[str]] = {
+    '财务核算': ['finance', 'vouchers', 'receivables', 'payables', 'invoices', 'reconciliation', 'travel_expense_audit'],
+    '工作流': ['approvals', 'tasks'],
+    '数据与审计': ['upload', 'edit', 'preview', 'dashboard', 'analysis', 'report', 'history'],
+    '协作': ['chat', 'video', 'collab', 'search'],
+    '智能体': ['ai', 'agent'],
+}

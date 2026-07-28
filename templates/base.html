@@ -29,7 +29,9 @@
   {% if g.current_user and request.path not in ('/login',) %}
   <aside class="app-sidebar" id="appSidebar">
     <div class="sidebar-brand">
-      <span class="brand-mark">财</span>
+      <span class="brand-mark brand-logo" title="智能财务">
+        <img src="{{ url_for('static', filename='img/logo.svg') }}?v={{ ui_build|default('13') }}" alt="Logo" width="38" height="38">
+      </span>
       <div class="brand-text">
         <strong>智能财务系统</strong>
         <small>{{ user_role_label|default('用户') }}{% if user_company %} · {{ user_company }}{% else %} · 核算·协作·AI{% endif %}</small>
@@ -37,13 +39,14 @@
     </div>
     <nav class="sidebar-nav">
       {% set uf = user_features|default({}) %}
-      {% if uf.get('finance') or uf.get('vouchers') or uf.get('receivables') or uf.get('payables') or uf.get('invoices') or uf.get('reconciliation') %}
+      {% if uf.get('finance') or uf.get('vouchers') or uf.get('receivables') or uf.get('payables') or uf.get('invoices') or uf.get('reconciliation') or uf.get('travel_expense_audit') %}
       <div class="nav-section-label">财务核算</div>
       {% if uf.get('finance') %}<a class="nav-item" href="/finance" data-path="/finance"><i class="bi bi-bank2"></i><span>财务总览</span></a>{% endif %}
       {% if uf.get('vouchers') %}<a class="nav-item" href="/finance/vouchers" data-path="/finance/vouchers"><i class="bi bi-journal-text"></i><span>凭证管理</span></a>{% endif %}
       {% if uf.get('receivables') %}<a class="nav-item" href="/finance/receivables" data-path="/finance/receivables"><i class="bi bi-cash-coin"></i><span>应收账款</span></a>{% endif %}
       {% if uf.get('payables') %}<a class="nav-item" href="/finance/payables" data-path="/finance/payables"><i class="bi bi-credit-card"></i><span>应付账款</span></a>{% endif %}
       {% if uf.get('invoices') %}<a class="nav-item" href="/finance/invoices" data-path="/finance/invoices"><i class="bi bi-receipt"></i><span>发票管理</span></a>{% endif %}
+      {% if uf.get('travel_expense_audit') %}<a class="nav-item" href="/finance/travel-expenses" data-path="/finance/travel-expenses"><i class="bi bi-airplane"></i><span>出差报销审计</span></a>{% endif %}
       {% if uf.get('reconciliation') %}<a class="nav-item" href="/finance/reconciliation" data-path="/finance/reconciliation"><i class="bi bi-bank"></i><span>银行对账</span></a>{% endif %}
       {% endif %}
       {% if uf.get('approvals') or uf.get('tasks') %}
@@ -77,6 +80,11 @@
       <a class="nav-item" href="/models" data-path="/models"><i class="bi bi-gear"></i><span>模型管理</span></a>
       <a class="nav-item" href="/agent/develop" data-path="/agent/develop"><i class="bi bi-code-slash"></i><span>Agent 开发</span></a>
       {% endif %}
+      {% if is_company_admin %}
+      <div class="nav-section-label">系统</div>
+      <a class="nav-item" href="/company/admin" data-path="/company/admin"><i class="bi bi-building-gear"></i><span>系统管理</span></a>
+      {% endif %}
+      <a class="nav-item" href="/downloads" data-path="/downloads"><i class="bi bi-download"></i><span>客户端下载</span></a>
       <a class="nav-item" href="/profile" data-path="/profile"><i class="bi bi-person"></i><span>个人空间</span></a>
       <button type="button" class="nav-item" data-pwa-install onclick="installFinanceApp()" style="width:100%;text-align:left;border:0;background:transparent;display:none" title="安装到桌面，像 App 一样打开">
         <i class="bi bi-download"></i><span>安装到桌面</span>
@@ -140,11 +148,20 @@
 
 {% if user_features.get('ai') %}
 <div id="aiFloatingBtn" class="ai-floating-btn" title="AI 智能助手 - 可拖拽，点击打开对话">
-  <i class="bi bi-robot"></i>
+  <div class="ai-anime-face" id="aiAnimeFace" aria-hidden="true">
+    <span class="ai-ear l"></span>
+    <span class="ai-ear r"></span>
+    <span class="ai-eye l"><span class="ai-pupil"></span></span>
+    <span class="ai-eye r"><span class="ai-pupil"></span></span>
+    <span class="ai-blush l"></span>
+    <span class="ai-blush r"></span>
+    <span class="ai-mouth"></span>
+    <span class="ai-badge">¥</span>
+  </div>
 </div>
 <div id="aiChatWindow" class="ai-chat-window" style="display:none">
   <div class="ai-chat-header" id="aiChatHeader">
-    <span><i class="bi bi-robot"></i> AI 智能助手</span>
+    <span><span class="ai-mini-face"></span> AI 智能助手</span>
     <div class="ai-chat-actions">
       <button type="button" onclick="clearAiChat()" title="清空"><i class="bi bi-arrow-counterclockwise"></i></button>
       <button type="button" onclick="toggleAiWindow()" title="最小化"><i class="bi bi-dash"></i></button>
@@ -211,6 +228,8 @@
 <script src="{{ url_for('static', filename='js/agent_actions.js') }}?v={{ ui_build|default('13') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}?v={{ ui_build|default('13') }}"></script>
 <script src="{{ url_for('static', filename='js/features.js') }}?v={{ ui_build|default('13') }}"></script>
+<script src="{{ url_for('static', filename='js/anime-ui.js') }}?v={{ ui_build|default('13') }}"></script>
+<script src="{{ url_for('static', filename='js/finance-dnd.js') }}?v={{ ui_build|default('13') }}"></script>
 <script src="{{ url_for('static', filename='js/pwa.js') }}?v={{ ui_build|default('13') }}"></script>
 {% block extra_scripts %}{% endblock %}
 </body>
