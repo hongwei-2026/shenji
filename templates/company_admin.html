@@ -1,0 +1,485 @@
+{% extends "base.html" %}
+{% block title %}系统管理 - {{ company_name }}{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <h1>系统管理</h1>
+    <p class="page-desc">技术管理员后台 · 「{{ company_name }}」数据概览、公司功能开通与成员权限</p>
+  </div>
+  <div class="page-actions">
+    <button type="button" class="btn btn-outline-primary btn-sm" id="btnReloadAll">
+      <i class="bi bi-arrow-clockwise"></i> 刷新
+    </button>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<ul class="nav nav-tabs mb-3" id="adminTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tabOverview" type="button">后台数据</button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabCompanyFeatures" type="button">公司功能</button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tabMembers" type="button">成员权限</button>
+  </li>
+</ul>
+
+<div class="tab-content">
+  <!-- 后台数据 -->
+  <div class="tab-pane fade show active" id="tabOverview">
+    <div id="overviewLoading" class="text-center text-muted py-4">加载后台数据...</div>
+    <div id="overviewBody" class="d-none">
+      <div class="row g-3 mb-3" id="overviewStats"></div>
+      <div class="row g-3">
+        <div class="col-lg-5">
+          <div class="panel h-100">
+            <div class="panel-header"><i class="bi bi-pie-chart"></i> 岗位分布</div>
+            <div class="panel-body" id="roleBreakdown"></div>
+          </div>
+        </div>
+        <div class="col-lg-7">
+          <div class="panel h-100">
+            <div class="panel-header"><i class="bi bi-people"></i> 最近成员</div>
+            <div class="panel-body p-0">
+              <div class="table-responsive">
+                <table class="table table-sm table-hover mb-0">
+                  <thead><tr><th>用户名</th><th>岗位</th><th>加入时间</th></tr></thead>
+                  <tbody id="recentMembersBody"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="panel mt-3">
+        <div class="panel-header"><i class="bi bi-grid-3x3-gap"></i> 当前已开通功能</div>
+        <div class="panel-body" id="overviewEnabledFeatures"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 公司功能 -->
+  <div class="tab-pane fade" id="tabCompanyFeatures">
+    <div class="panel mb-3">
+      <div class="panel-body py-3">
+        <p class="mb-2 text-muted small">
+          在此为公司<strong>开通或关闭</strong>功能模块。未开通的功能，成员即使被分配岗位也无法使用。
+          开通后，再到「成员权限」里给具体员工分配岗位或微调开关。
+        </p>
+        <div class="d-flex flex-wrap gap-2">
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="btnFeatAll">全选</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" id="btnFeatNone">全不选</button>
+          <button type="button" class="btn btn-sm btn-outline-primary" id="btnFeatBasic">推荐基础包</button>
+          <button type="button" class="btn btn-sm btn-primary ms-auto" id="btnSaveCompanyFeatures">
+            <i class="bi bi-check2"></i> 保存公司功能
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="companyFeatLoading" class="text-center text-muted py-3">加载中...</div>
+    <div id="companyFeatGroups" class="d-none"></div>
+  </div>
+
+  <!-- 成员权限 -->
+  <div class="tab-pane fade" id="tabMembers">
+    <div class="panel mb-3">
+      <div class="panel-body py-3">
+        <p class="mb-0 text-muted small">
+          先确保「公司功能」已开通对应模块，再为成员选择岗位并微调个人开关。
+          灰色项表示公司尚未开通，需先在「公司功能」中开启。
+        </p>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-people"></i> 成员列表 <span class="badge bg-secondary" id="memberCount">0</span></span>
+      </div>
+      <div class="panel-body p-0">
+        <div id="membersLoading" class="text-center text-muted py-4">加载中...</div>
+        <div id="membersEmpty" class="alert alert-info m-3 d-none">暂无成员</div>
+        <div class="table-responsive d-none" id="membersTableWrap">
+          <table class="table table-hover mb-0 align-middle" id="membersTable">
+            <thead>
+              <tr>
+                <th style="min-width:120px">用户名</th>
+                <th style="min-width:140px">岗位</th>
+                <th>权限摘要</th>
+                <th style="min-width:160px">操作</th>
+              </tr>
+            </thead>
+            <tbody id="membersBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="permModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">调整权限 — <span id="permUsername"></span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="permMemberId">
+        <div class="mb-3">
+          <label class="form-label">岗位角色</label>
+          <select class="form-select" id="permRole"></select>
+          <div class="form-text">切换岗位会先套用该岗位默认权限，再叠加下方开关（受公司开通限制）。</div>
+        </div>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <strong class="small">功能开关</strong>
+          <button type="button" class="btn btn-link btn-sm p-0" id="btnApplyRoleDefaults">套用岗位默认到开关</button>
+        </div>
+        <div class="row g-2" id="permFeatureGrid"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline-secondary" id="btnResetFeatures">恢复默认</button>
+        <button type="button" class="btn btn-primary" id="btnSavePerm">保存</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+const ROLES = {{ roles|tojson }};
+const FEATURES = {{ features|tojson }};
+const FEATURE_GROUPS = {{ feature_groups|tojson }};
+const ROLE_DEFAULTS = {{ role_defaults|tojson }};
+const BASIC_PACK = ['upload','edit','preview','history','chat','video','collab','search','ai','agent'];
+
+let membersCache = [];
+let companyFeatures = {};
+let permModal;
+
+document.addEventListener('DOMContentLoaded', () => {
+  permModal = new bootstrap.Modal(document.getElementById('permModal'));
+  document.getElementById('btnReloadAll').addEventListener('click', () => {
+    loadOverview();
+    loadCompanyFeatures();
+    loadMembers();
+  });
+  document.getElementById('btnSavePerm').addEventListener('click', savePerm);
+  document.getElementById('btnResetFeatures').addEventListener('click', resetFeatures);
+  document.getElementById('btnApplyRoleDefaults').addEventListener('click', applyRoleDefaultsToGrid);
+  document.getElementById('permRole').addEventListener('change', applyRoleDefaultsToGrid);
+  document.getElementById('btnSaveCompanyFeatures').addEventListener('click', saveCompanyFeatures);
+  document.getElementById('btnFeatAll').addEventListener('click', () => setAllCompanyFeats(true));
+  document.getElementById('btnFeatNone').addEventListener('click', () => setAllCompanyFeats(false));
+  document.getElementById('btnFeatBasic').addEventListener('click', applyBasicPack);
+  loadOverview();
+  loadCompanyFeatures();
+  loadMembers();
+});
+
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+async function loadOverview() {
+  const loading = document.getElementById('overviewLoading');
+  const body = document.getElementById('overviewBody');
+  loading.classList.remove('d-none');
+  body.classList.add('d-none');
+  try {
+    const res = await fetch('/api/company/overview');
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '加载失败');
+    const s = data.stats || {};
+    document.getElementById('overviewStats').innerHTML = [
+      ['成员数', data.member_count, 'bi-people'],
+      ['系统管理员', data.admin_count, 'bi-shield-lock'],
+      ['审计记录', s.history_records, 'bi-archive'],
+      ['消息数', s.messages, 'bi-chat'],
+      ['凭证数', s.vouchers, 'bi-journal-text'],
+      ['发票数', s.invoices, 'bi-receipt'],
+      ['协同会话', s.collab_sessions, 'bi-people'],
+      ['已开通功能', `${s.features_enabled}/${s.features_total}`, 'bi-grid'],
+    ].map(([label, val, icon]) => `
+      <div class="col-6 col-md-3">
+        <div class="panel h-100 mb-0">
+          <div class="panel-body py-3 text-center">
+            <div class="text-muted small"><i class="bi ${icon}"></i> ${label}</div>
+            <div class="fs-4 fw-semibold mt-1">${val ?? 0}</div>
+          </div>
+        </div>
+      </div>`).join('');
+
+    document.getElementById('roleBreakdown').innerHTML = (data.role_breakdown || []).length
+      ? (data.role_breakdown || []).map(r => `
+          <div class="d-flex justify-content-between border-bottom py-2">
+            <span>${escapeHtml(r.label)}</span>
+            <strong>${r.count}</strong>
+          </div>`).join('')
+      : '<div class="text-muted">暂无</div>';
+
+    document.getElementById('recentMembersBody').innerHTML = (data.recent_members || []).map(m => `
+      <tr>
+        <td>${escapeHtml(m.username)}</td>
+        <td>${escapeHtml(m.role_label)}</td>
+        <td class="small text-muted">${escapeHtml(m.created_at)}</td>
+      </tr>`).join('') || '<tr><td colspan="3" class="text-muted text-center">暂无</td></tr>';
+
+    const labels = data.enabled_feature_labels || [];
+    document.getElementById('overviewEnabledFeatures').innerHTML = labels.length
+      ? labels.map(l => `<span class="badge bg-secondary me-1 mb-1">${escapeHtml(l)}</span>`).join('')
+      : '<span class="text-muted">尚未开通任何功能</span>';
+
+    companyFeatures = data.enabled_features || companyFeatures;
+    loading.classList.add('d-none');
+    body.classList.remove('d-none');
+  } catch (err) {
+    loading.textContent = err.message || '加载失败';
+  }
+}
+
+async function loadCompanyFeatures() {
+  const loading = document.getElementById('companyFeatLoading');
+  const wrap = document.getElementById('companyFeatGroups');
+  loading.classList.remove('d-none');
+  wrap.classList.add('d-none');
+  try {
+    const res = await fetch('/api/company/features');
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '加载失败');
+    companyFeatures = data.enabled_features || {};
+    renderCompanyFeatureGroups(companyFeatures);
+    loading.classList.add('d-none');
+    wrap.classList.remove('d-none');
+  } catch (err) {
+    loading.textContent = err.message || '加载失败';
+  }
+}
+
+function renderCompanyFeatureGroups(enabled) {
+  const wrap = document.getElementById('companyFeatGroups');
+  wrap.innerHTML = Object.entries(FEATURE_GROUPS).map(([group, keys]) => `
+    <div class="panel mb-3">
+      <div class="panel-header d-flex justify-content-between">
+        <span>${escapeHtml(group)}</span>
+        <span class="small text-muted">${keys.filter(k => enabled[k]).length}/${keys.length}</span>
+      </div>
+      <div class="panel-body">
+        <div class="row g-2">
+          ${keys.map(key => `
+            <div class="col-md-4 col-sm-6">
+              <div class="form-check">
+                <input class="form-check-input company-feat" type="checkbox" value="${key}"
+                       id="cofeat_${key}" ${enabled[key] ? 'checked' : ''}>
+                <label class="form-check-label" for="cofeat_${key}">${escapeHtml(FEATURES[key] || key)}</label>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function setAllCompanyFeats(on) {
+  document.querySelectorAll('.company-feat').forEach(el => { el.checked = !!on; });
+}
+
+function applyBasicPack() {
+  const set = new Set(BASIC_PACK);
+  document.querySelectorAll('.company-feat').forEach(el => {
+    el.checked = set.has(el.value);
+  });
+}
+
+function collectCompanyFeatures() {
+  const out = {};
+  Object.keys(FEATURES).forEach(k => { out[k] = false; });
+  document.querySelectorAll('.company-feat').forEach(el => {
+    out[el.value] = !!el.checked;
+  });
+  return out;
+}
+
+async function saveCompanyFeatures() {
+  const btn = document.getElementById('btnSaveCompanyFeatures');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/company/features', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ enabled_features: collectCompanyFeatures() }),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '保存失败');
+    companyFeatures = data.enabled_features || {};
+    renderCompanyFeatureGroups(companyFeatures);
+    if (typeof showToast === 'function') showToast('公司功能已保存', 'success');
+    else alert('公司功能已保存');
+    loadOverview();
+    loadMembers();
+  } catch (err) {
+    alert(err.message || '保存失败');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadMembers() {
+  const loading = document.getElementById('membersLoading');
+  const empty = document.getElementById('membersEmpty');
+  const wrap = document.getElementById('membersTableWrap');
+  loading.classList.remove('d-none');
+  empty.classList.add('d-none');
+  wrap.classList.add('d-none');
+  try {
+    const res = await fetch('/api/company/members');
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '加载失败');
+    membersCache = data.members || [];
+    companyFeatures = data.company_features || companyFeatures;
+    document.getElementById('memberCount').textContent = membersCache.length;
+    renderMembers();
+  } catch (err) {
+    loading.textContent = err.message || '加载失败';
+    return;
+  }
+  loading.classList.add('d-none');
+  if (!membersCache.length) empty.classList.remove('d-none');
+  else wrap.classList.remove('d-none');
+}
+
+function featureSummary(features) {
+  const keys = Object.keys(FEATURES).filter(k => features && features[k]);
+  if (!keys.length) return '<span class="text-muted">无</span>';
+  const labels = keys.slice(0, 6).map(k => FEATURES[k]);
+  const more = keys.length > 6 ? ` +${keys.length - 6}` : '';
+  return `<span class="small">${labels.join('、')}${more}</span>`;
+}
+
+function renderMembers() {
+  const body = document.getElementById('membersBody');
+  body.innerHTML = membersCache.map(m => {
+    const overrideHint = Object.keys(m.feature_overrides || {}).length
+      ? '<span class="badge bg-warning text-dark ms-1">已微调</span>' : '';
+    const selfHint = m.is_self ? '<span class="badge bg-primary ms-1">我</span>' : '';
+    return `<tr data-id="${m.id}">
+      <td><strong>${escapeHtml(m.username)}</strong>${selfHint}</td>
+      <td>${escapeHtml(m.role_label || ROLES[m.role] || m.role)}${overrideHint}</td>
+      <td>${featureSummary(m.features)}</td>
+      <td>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="openPerm(${m.id})">
+          <i class="bi bi-sliders"></i> 权限
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function openPerm(memberId) {
+  const m = membersCache.find(x => x.id === memberId);
+  if (!m) return;
+  document.getElementById('permMemberId').value = m.id;
+  document.getElementById('permUsername').textContent = m.username;
+  const roleSel = document.getElementById('permRole');
+  roleSel.innerHTML = Object.entries(ROLES).map(([k, label]) =>
+    `<option value="${k}" ${k === m.role ? 'selected' : ''}>${escapeHtml(label)}</option>`
+  ).join('');
+  renderFeatureGrid(m.features || {});
+  permModal.show();
+}
+
+function renderFeatureGrid(features) {
+  const grid = document.getElementById('permFeatureGrid');
+  grid.innerHTML = Object.entries(FEATURES).map(([key, label]) => {
+    const companyOn = companyFeatures[key] !== false;
+    const checked = features[key] ? 'checked' : '';
+    const disabled = companyOn ? '' : 'disabled';
+    const hint = companyOn ? '' : ' <span class="text-muted small">(公司未开通)</span>';
+    return `<div class="col-md-4 col-sm-6">
+      <div class="form-check">
+        <input class="form-check-input perm-feat" type="checkbox" value="${key}"
+               id="feat_${key}" ${checked} ${disabled}>
+        <label class="form-check-label ${companyOn ? '' : 'text-muted'}" for="feat_${key}">
+          ${escapeHtml(label)}${hint}
+        </label>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function applyRoleDefaultsToGrid() {
+  const role = document.getElementById('permRole').value;
+  const defaults = ROLE_DEFAULTS[role] || {};
+  const merged = {};
+  Object.keys(FEATURES).forEach(k => {
+    merged[k] = !!(defaults[k] && companyFeatures[k] !== false);
+  });
+  renderFeatureGrid(merged);
+}
+
+function collectOverrides() {
+  const role = document.getElementById('permRole').value;
+  const defaults = ROLE_DEFAULTS[role] || {};
+  const overrides = {};
+  document.querySelectorAll('.perm-feat').forEach(el => {
+    if (el.disabled) return;
+    const key = el.value;
+    const on = !!el.checked;
+    const def = !!defaults[key];
+    if (on !== def) overrides[key] = on;
+  });
+  return overrides;
+}
+
+async function savePerm() {
+  const memberId = document.getElementById('permMemberId').value;
+  const role = document.getElementById('permRole').value;
+  const feature_overrides = collectOverrides();
+  const btn = document.getElementById('btnSavePerm');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/company/members/${memberId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role, feature_overrides }),
+    });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '保存失败');
+    const idx = membersCache.findIndex(m => m.id === data.member.id);
+    if (idx >= 0) membersCache[idx] = data.member;
+    renderMembers();
+    permModal.hide();
+    if (data.member && data.member.is_self && data.member.role !== 'company_admin') {
+      location.href = '/profile';
+      return;
+    }
+    loadOverview();
+  } catch (err) {
+    alert(err.message || '保存失败');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function resetFeatures() {
+  const memberId = document.getElementById('permMemberId').value;
+  if (!confirm('清除功能微调，恢复为当前岗位默认权限？')) return;
+  try {
+    const res = await fetch(`/api/company/members/${memberId}/reset-features`, { method: 'POST' });
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '操作失败');
+    const idx = membersCache.findIndex(m => m.id === data.member.id);
+    if (idx >= 0) membersCache[idx] = data.member;
+    document.getElementById('permRole').value = data.member.role;
+    renderFeatureGrid(data.member.features || {});
+    renderMembers();
+  } catch (err) {
+    alert(err.message || '操作失败');
+  }
+}
+</script>
+{% endblock %}

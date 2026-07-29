@@ -49,12 +49,23 @@
       <div class="card-header bg-transparent"><strong>当前会计期间</strong></div>
       <div class="card-body" id="periodInfo">加载中…</div>
     </div>
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm mb-3">
       <div class="card-header bg-transparent d-flex justify-content-between">
         <strong>最近凭证</strong>
         <a href="/finance/vouchers" class="small">全部</a>
       </div>
       <div class="card-body p-0" id="recentVouchers">加载中…</div>
+    </div>
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-transparent"><strong>快捷入口</strong></div>
+      <div class="card-body d-flex flex-wrap gap-2">
+        <a class="btn btn-sm btn-outline-primary" href="/finance/vouchers"><i class="bi bi-journal-text"></i> 凭证</a>
+        <a class="btn btn-sm btn-outline-primary" href="/finance/receivables"><i class="bi bi-cash-coin"></i> 应收</a>
+        <a class="btn btn-sm btn-outline-primary" href="/finance/payables"><i class="bi bi-credit-card"></i> 应付</a>
+        <a class="btn btn-sm btn-outline-primary" href="/finance/invoices"><i class="bi bi-receipt"></i> 发票</a>
+        <a class="btn btn-sm btn-outline-primary" href="/finance/travel-expenses"><i class="bi bi-airplane"></i> 出差报销</a>
+        <a class="btn btn-sm btn-outline-primary" href="/finance/reconciliation"><i class="bi bi-bank"></i> 银行对账</a>
+      </div>
     </div>
   </div>
 </div>

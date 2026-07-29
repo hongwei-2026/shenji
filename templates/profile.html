@@ -29,6 +29,17 @@
           </div>
           <div class="form-text small">职业用户补填公司后，同公司同事会自动成为好友并可直接聊天。</div>
         </div>
+        <div class="text-start mt-3">
+          <label class="form-label small mb-1">岗位角色</label>
+          <div class="input-group input-group-sm">
+            <select class="form-select" id="profileRole"></select>
+            <button type="button" class="btn btn-outline-primary" id="btnSaveRole">保存</button>
+          </div>
+          <div class="form-text small">可自选「系统管理员」（技术岗）管理本公司成员权限（须已填写公司）。他人权限请在「系统管理」中调整。</div>
+          {% if is_company_admin %}
+          <a href="/company/admin" class="btn btn-sm btn-primary mt-2 w-100"><i class="bi bi-building-gear"></i> 进入系统管理</a>
+          {% endif %}
+        </div>
         <hr>
         <div class="row text-center">
           <div class="col-4">
@@ -139,8 +150,20 @@ function loadProfile() {
         document.getElementById('statMessages').textContent = d.stats.messages_count || 0;
         const companyInput = document.getElementById('profileCompany');
         if (companyInput && d.user.company) companyInput.value = d.user.company;
+        initRoleSelect(d.user.role || '');
       }
     });
+}
+
+function initRoleSelect(currentRole) {
+  const sel = document.getElementById('profileRole');
+  if (!sel) return;
+  fetch('/api/auth/roles').then(r => r.json()).then(d => {
+    const roles = (d && d.roles) || {};
+    sel.innerHTML = Object.entries(roles).map(([k, label]) =>
+      `<option value="${k}" ${k === currentRole ? 'selected' : ''}>${label}</option>`
+    ).join('');
+  }).catch(() => {});
 }
 
 document.getElementById('btnSaveCompany')?.addEventListener('click', () => {
@@ -154,6 +177,21 @@ document.getElementById('btnSaveCompany')?.addEventListener('click', () => {
     if (d.success) {
       showToast(d.auto_friends ? `已保存，并关联 ${d.auto_friends} 位同公司同事` : '公司已保存', 'success');
       loadFriends();
+    } else showToast(d.error || '保存失败', 'error');
+  });
+});
+
+document.getElementById('btnSaveRole')?.addEventListener('click', () => {
+  const role = document.getElementById('profileRole')?.value;
+  if (!role) return;
+  fetch('/api/profile/role', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ role }),
+  }).then(r => r.json()).then(d => {
+    if (d.success) {
+      showToast('岗位已更新为「' + (d.role_label || role) + '」', 'success');
+      setTimeout(() => location.reload(), 600);
     } else showToast(d.error || '保存失败', 'error');
   });
 });

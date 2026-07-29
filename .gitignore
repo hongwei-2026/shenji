@@ -14,3 +14,12 @@ shared_files/*
 *.log
 *.safetensors
 *.safetensors.part-*
+# native packaging — do not push binaries / deps
+native/**/node_modules/
+native/**/dist/
+native/mobile/android/.gradle/
+native/mobile/android/app/build/
+static/downloads/*.AppImage
+static/downloads/*.zip
+static/downloads/*.apk
+static/downloads/*.hap

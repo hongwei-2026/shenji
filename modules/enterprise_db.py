@@ -12,11 +12,10 @@ _SCHEMA_DONE = False
 
 def ensure_enterprise_schema() -> None:
     global _SCHEMA_DONE
-    if _SCHEMA_DONE:
-        return
     init_db()
     with _connect() as conn:
-        conn.executescript('''
+        if not _SCHEMA_DONE:
+            conn.executescript('''
             CREATE TABLE IF NOT EXISTS fin_partners (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -150,9 +149,84 @@ def ensure_enterprise_schema() -> None:
                 created_at TEXT NOT NULL,
                 UNIQUE(user_id, doc_type, doc_id, version_no)
             );
+            CREATE TABLE IF NOT EXISTS fin_travel_claims (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                claim_no TEXT NOT NULL,
+                traveler TEXT NOT NULL,
+                department TEXT,
+                destination TEXT,
+                trip_purpose TEXT,
+                start_date TEXT NOT NULL,
+                end_date TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'draft',
+                audit_status TEXT NOT NULL DEFAULT 'pending',
+                audit_flags TEXT NOT NULL DEFAULT '[]',
+                audit_score REAL,
+                auditor_note TEXT,
+                summary TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(user_id, claim_no)
+            );
+            CREATE TABLE IF NOT EXISTS fin_travel_claim_lines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                claim_id INTEGER NOT NULL,
+                line_no INTEGER NOT NULL,
+                expense_date TEXT,
+                category TEXT NOT NULL,
+                description TEXT,
+                amount REAL NOT NULL DEFAULT 0,
+                currency TEXT NOT NULL DEFAULT 'CNY',
+                has_receipt INTEGER NOT NULL DEFAULT 1,
+                city TEXT,
+                FOREIGN KEY (claim_id) REFERENCES fin_travel_claims(id)
+            );
         ''')
+            _SCHEMA_DONE = True
+        _ensure_travel_tables(conn)
         conn.commit()
-    _SCHEMA_DONE = True
+
+
+def _ensure_travel_tables(conn) -> None:
+    """热更新：已初始化进程也能补建差旅报销表。"""
+    conn.executescript('''
+        CREATE TABLE IF NOT EXISTS fin_travel_claims (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            claim_no TEXT NOT NULL,
+            traveler TEXT NOT NULL,
+            department TEXT,
+            destination TEXT,
+            trip_purpose TEXT,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            amount REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'draft',
+            audit_status TEXT NOT NULL DEFAULT 'pending',
+            audit_flags TEXT NOT NULL DEFAULT '[]',
+            audit_score REAL,
+            auditor_note TEXT,
+            summary TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(user_id, claim_no)
+        );
+        CREATE TABLE IF NOT EXISTS fin_travel_claim_lines (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            claim_id INTEGER NOT NULL,
+            line_no INTEGER NOT NULL,
+            expense_date TEXT,
+            category TEXT NOT NULL,
+            description TEXT,
+            amount REAL NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'CNY',
+            has_receipt INTEGER NOT NULL DEFAULT 1,
+            city TEXT,
+            FOREIGN KEY (claim_id) REFERENCES fin_travel_claims(id)
+        );
+    ''')
 
 
 def _now() -> str:
@@ -629,3 +703,257 @@ def get_doc_version(user_id: int, doc_type: str, doc_id: int, version_no: int) -
     d = dict(row)
     d['snapshot'] = json.loads(d.pop('snapshot_json') or '{}')
     return d
+
+
+# ---------- 出差费用报销审计 ----------
+
+TRAVEL_CATEGORIES = {
+    'transport': '交通费',
+    'hotel': '住宿费',
+    'meal': '餐费',
+    'misc': '其他',
+}
+
+# 默认审计阈值（元）
+_MEAL_DAILY_LIMIT = 150.0
+_HOTEL_NIGHT_LIMIT = 600.0
+
+
+def _next_travel_claim_no(conn, user_id: int) -> str:
+    row = conn.execute(
+        "SELECT claim_no FROM fin_travel_claims WHERE user_id=? AND claim_no LIKE 'TR%' ORDER BY id DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+    if not row:
+        return 'TR0001'
+    try:
+        n = int(str(row['claim_no']).replace('TR', '')) + 1
+    except ValueError:
+        n = 1
+    return f'TR{n:04d}'
+
+
+def list_travel_claims(user_id: int, status: str | None = None, limit: int = 100) -> list[dict]:
+    ensure_enterprise_schema()
+    with _connect() as conn:
+        if status:
+            rows = conn.execute(
+                '''SELECT * FROM fin_travel_claims WHERE user_id=? AND status=?
+                   ORDER BY created_at DESC LIMIT ?''',
+                (user_id, status, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                '''SELECT * FROM fin_travel_claims WHERE user_id=?
+                   ORDER BY created_at DESC LIMIT ?''',
+                (user_id, limit),
+            ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d['audit_flags'] = json.loads(d.get('audit_flags') or '[]')
+        except (json.JSONDecodeError, TypeError):
+            d['audit_flags'] = []
+        out.append(d)
+    return out
+
+
+def get_travel_claim(user_id: int, claim_id: int) -> dict | None:
+    ensure_enterprise_schema()
+    with _connect() as conn:
+        row = conn.execute(
+            'SELECT * FROM fin_travel_claims WHERE id=? AND user_id=?',
+            (claim_id, user_id),
+        ).fetchone()
+        if not row:
+            return None
+        lines = conn.execute(
+            'SELECT * FROM fin_travel_claim_lines WHERE claim_id=? ORDER BY line_no',
+            (claim_id,),
+        ).fetchall()
+    d = dict(row)
+    try:
+        d['audit_flags'] = json.loads(d.get('audit_flags') or '[]')
+    except (json.JSONDecodeError, TypeError):
+        d['audit_flags'] = []
+    d['lines'] = [dict(x) for x in lines]
+    return d
+
+
+def create_travel_claim(user_id: int, data: dict) -> int:
+    ensure_enterprise_schema()
+    now = _now()
+    lines = data.get('lines') or []
+    amount = sum(float(ln.get('amount') or 0) for ln in lines) or float(data.get('amount') or 0)
+    start = (data.get('start_date') or now[:10]).strip()
+    end = (data.get('end_date') or start).strip()
+    with _connect() as conn:
+        claim_no = data.get('claim_no') or _next_travel_claim_no(conn, user_id)
+        cur = conn.execute(
+            '''INSERT INTO fin_travel_claims
+               (user_id, claim_no, traveler, department, destination, trip_purpose,
+                start_date, end_date, amount, status, audit_status, audit_flags,
+                summary, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', 'pending', '[]', ?, ?, ?)''',
+            (
+                user_id, claim_no,
+                (data.get('traveler') or '').strip() or '未命名',
+                data.get('department') or '',
+                data.get('destination') or '',
+                data.get('trip_purpose') or '',
+                start, end, amount,
+                data.get('summary') or '',
+                now, now,
+            ),
+        )
+        cid = int(cur.lastrowid)
+        for i, ln in enumerate(lines, 1):
+            conn.execute(
+                '''INSERT INTO fin_travel_claim_lines
+                   (claim_id, line_no, expense_date, category, description, amount, currency, has_receipt, city)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (
+                    cid, i,
+                    ln.get('expense_date') or start,
+                    ln.get('category') or 'misc',
+                    ln.get('description') or '',
+                    float(ln.get('amount') or 0),
+                    ln.get('currency') or 'CNY',
+                    1 if ln.get('has_receipt', True) else 0,
+                    ln.get('city') or data.get('destination') or '',
+                ),
+            )
+        conn.commit()
+    # 创建后自动跑一遍审计规则
+    run_travel_claim_audit(user_id, cid)
+    return cid
+
+
+def run_travel_claim_audit(user_id: int, claim_id: int) -> dict:
+    """出差报销审计规则：单据完整性、标准超限、重复报销、日期合理性。"""
+    ensure_enterprise_schema()
+    claim = get_travel_claim(user_id, claim_id)
+    if not claim:
+        raise ValueError('报销单不存在')
+
+    flags: list[dict] = []
+    lines = claim.get('lines') or []
+    start, end = claim.get('start_date') or '', claim.get('end_date') or ''
+
+    if start and end and end < start:
+        flags.append({'level': 'high', 'code': 'date_order', 'message': '结束日期早于开始日期'})
+
+    line_sum = sum(float(ln.get('amount') or 0) for ln in lines)
+    header_amt = float(claim.get('amount') or 0)
+    if lines and abs(line_sum - header_amt) > 0.05:
+        flags.append({
+            'level': 'medium', 'code': 'amount_mismatch',
+            'message': f'明细合计 {line_sum:.2f} 与单据金额 {header_amt:.2f} 不一致',
+        })
+
+    meal_by_day: dict[str, float] = {}
+    for ln in lines:
+        cat = ln.get('category') or 'misc'
+        amt = float(ln.get('amount') or 0)
+        day = ln.get('expense_date') or start
+        if not int(ln.get('has_receipt') or 0):
+            flags.append({
+                'level': 'medium', 'code': 'missing_receipt',
+                'message': f'明细#{ln.get("line_no")}（{TRAVEL_CATEGORIES.get(cat, cat)}）缺少票据',
+            })
+        if cat == 'meal':
+            meal_by_day[day] = meal_by_day.get(day, 0) + amt
+        if cat == 'hotel' and amt > _HOTEL_NIGHT_LIMIT:
+            flags.append({
+                'level': 'medium', 'code': 'hotel_over_limit',
+                'message': f'住宿费 {amt:.2f} 超过标准 {_HOTEL_NIGHT_LIMIT:.0f}/晚',
+            })
+        if day and start and end and (day < start or day > end):
+            flags.append({
+                'level': 'high', 'code': 'expense_out_of_trip',
+                'message': f'费用日期 {day} 不在出差期间 {start}~{end}',
+            })
+
+    for day, total in meal_by_day.items():
+        if total > _MEAL_DAILY_LIMIT:
+            flags.append({
+                'level': 'medium', 'code': 'meal_over_limit',
+                'message': f'{day} 餐费合计 {total:.2f} 超过日标准 {_MEAL_DAILY_LIMIT:.0f}',
+            })
+
+    # 疑似重复：同出差人、同目的地、日期重叠、金额接近
+    with _connect() as conn:
+        peers = conn.execute(
+            '''SELECT id, claim_no, start_date, end_date, amount FROM fin_travel_claims
+               WHERE user_id=? AND traveler=? AND id!=? AND status NOT IN ('rejected','draft')''',
+            (user_id, claim.get('traveler'), claim_id),
+        ).fetchall()
+    for p in peers:
+        ps, pe = p['start_date'] or '', p['end_date'] or ''
+        overlap = bool(start and end and ps and pe and not (end < ps or start > pe))
+        amt_close = abs(float(p['amount'] or 0) - header_amt) < max(1.0, header_amt * 0.05)
+        dest_same = True  # 宽松：同人重叠即提示
+        if overlap and (amt_close or dest_same):
+            flags.append({
+                'level': 'high', 'code': 'possible_duplicate',
+                'message': f'疑似与报销单 {p["claim_no"]}（{ps}~{pe}）重复',
+            })
+            break
+
+    high = sum(1 for f in flags if f['level'] == 'high')
+    medium = sum(1 for f in flags if f['level'] == 'medium')
+    score = max(0.0, 100.0 - high * 25 - medium * 10)
+    if not flags:
+        audit_status = 'pass'
+    elif high:
+        audit_status = 'fail'
+    else:
+        audit_status = 'warn'
+
+    now = _now()
+    with _connect() as conn:
+        conn.execute(
+            '''UPDATE fin_travel_claims
+               SET audit_flags=?, audit_score=?, audit_status=?, updated_at=?
+               WHERE id=? AND user_id=?''',
+            (_json_dumps(flags), score, audit_status, now, claim_id, user_id),
+        )
+        conn.commit()
+    return {
+        'claim_id': claim_id,
+        'audit_status': audit_status,
+        'audit_score': score,
+        'audit_flags': flags,
+    }
+
+
+def update_travel_claim_status(
+    user_id: int,
+    claim_id: int,
+    status: str,
+    auditor_note: str | None = None,
+) -> None:
+    ensure_enterprise_schema()
+    allowed = {'draft', 'submitted', 'approved', 'rejected', 'paid'}
+    if status not in allowed:
+        raise ValueError('无效状态')
+    now = _now()
+    with _connect() as conn:
+        row = conn.execute(
+            'SELECT id FROM fin_travel_claims WHERE id=? AND user_id=?',
+            (claim_id, user_id),
+        ).fetchone()
+        if not row:
+            raise ValueError('报销单不存在')
+        if auditor_note is not None:
+            conn.execute(
+                'UPDATE fin_travel_claims SET status=?, auditor_note=?, updated_at=? WHERE id=?',
+                (status, auditor_note, now, claim_id),
+            )
+        else:
+            conn.execute(
+                'UPDATE fin_travel_claims SET status=?, updated_at=? WHERE id=?',
+                (status, now, claim_id),
+            )
+        conn.commit()

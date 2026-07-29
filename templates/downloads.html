@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}客户端下载 - 智能财务系统{% endblock %}
+
+{% block page_header %}
+<div class="page-header">
+  <div>
+    <h1>客户端安装包</h1>
+    <p class="page-desc">Windows / macOS / Linux / Android；鸿蒙与 iOS 按说明在对应工具链编译</p>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+  <div class="col-md-6 col-lg-4"><div class="panel h-100"><div class="panel-header"><i class="bi bi-windows"></i> Windows</div><div class="panel-body"><p class="small text-muted">绿色版 / 压缩包，解压或直接运行</p><div id="dl-win" class="d-grid gap-2">加载中…</div></div></div></div>
+  <div class="col-md-6 col-lg-4"><div class="panel h-100"><div class="panel-header"><i class="bi bi-apple"></i> Apple</div><div class="panel-body"><p class="small text-muted">macOS 未签名包；iOS 需 Xcode 签名</p><div id="dl-mac" class="d-grid gap-2">加载中…</div><div class="small text-muted mt-2">iOS 工程：native/mobile（cap add ios）</div></div></div></div>
+  <div class="col-md-6 col-lg-4"><div class="panel h-100"><div class="panel-header"><i class="bi bi-phone"></i> Android</div><div class="panel-body"><p class="small text-muted">APK 直接安装</p><div id="dl-android" class="d-grid gap-2">加载中…</div></div></div></div>
+  <div class="col-md-6 col-lg-4"><div class="panel h-100"><div class="panel-header"><i class="bi bi-phone-fill"></i> 鸿蒙</div><div class="panel-body"><p class="small text-muted">HarmonyOS NEXT 用 DevEco 编译 native/harmony；兼容机可先装 APK</p><a class="btn btn-outline-primary btn-sm" href="/api/downloads/harmony-guide">鸿蒙打包说明</a></div></div></div>
+  <div class="col-md-6 col-lg-4"><div class="panel h-100"><div class="panel-header"><i class="bi bi-ubuntu"></i> Linux</div><div class="panel-body"><p class="small text-muted">AppImage 免安装</p><div id="dl-linux" class="d-grid gap-2">加载中…</div></div></div></div>
+</div>
+<div class="panel mt-3"><div class="panel-body small text-muted">客户端连接：<code id="serverUrl"></code></div></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.getElementById('serverUrl').textContent = location.origin;
+(async () => {
+  const res = await fetch('/api/downloads');
+  const data = await res.json();
+  const map = { win: 'dl-win', mac: 'dl-mac', android: 'dl-android', linux: 'dl-linux' };
+  Object.values(map).forEach(id => {
+    document.getElementById(id).innerHTML = '<span class="text-muted small">暂无文件</span>';
+  });
+  (data.files || []).forEach(f => {
+    const el = document.getElementById(map[f.platform]);
+    if (!el) return;
+    if (el.querySelector('.text-muted')) el.innerHTML = '';
+    const a = document.createElement('a');
+    a.className = 'btn btn-primary btn-sm';
+    a.href = f.url;
+    a.textContent = `下载 ${f.name} (${f.size})`;
+    el.appendChild(a);
+  });
+})();
+</script>
+{% endblock %}
