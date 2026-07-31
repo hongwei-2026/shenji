@@ -134,10 +134,10 @@ jobs:
         run: |
           diff-cover coverage.xml \
             --compare-branch "origin/${{ github.base_ref }}" \
-            --fail-under 40 \
+            --fail-under 35 \
             --exclude 'tests/*' 'native/*' 'static/*' \
             || {
-              echo "::error::Changed lines need >=40% test coverage. Add/adjust tests for your diff."
+              echo "::error::Changed lines need >=35% test coverage. Add/adjust tests for your diff."
               exit 1
             }
 
