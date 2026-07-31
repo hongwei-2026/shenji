@@ -137,7 +137,7 @@ jobs:
             --fail-under 40 \
             --exclude 'tests/*' 'native/*' 'static/*' \
             || {
-              echo "::error::Changed lines need >=45% test coverage. Add/adjust tests for your diff."
+              echo "::error::Changed lines need >=40% test coverage. Add/adjust tests for your diff."
               exit 1
             }
 
