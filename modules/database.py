@@ -50,6 +50,12 @@ def _connect() -> sqlite3.Connection:
 
 
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    exists = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+        (table,),
+    ).fetchone()
+    if not exists:
+        return
     cols = {row[1] for row in conn.execute(f'PRAGMA table_info({table})')}
     if column not in cols:
         conn.execute(f'ALTER TABLE {table} ADD COLUMN {column} {definition}')
@@ -191,15 +197,6 @@ def _init_db_schema() -> None:
         _ensure_column(conn, 'messages', 'is_read', 'INTEGER DEFAULT 0')
         _ensure_column(conn, 'messages', 'msg_type', "TEXT NOT NULL DEFAULT 'text'")
         _ensure_column(conn, 'messages', 'media_url', "TEXT NOT NULL DEFAULT ''")
-        _ensure_column(conn, 'collab_sessions', 'source_table_id', 'TEXT')
-        conn.execute('''
-            CREATE TABLE IF NOT EXISTS company_settings (
-                company TEXT PRIMARY KEY,
-                enabled_features TEXT NOT NULL DEFAULT '{}',
-                updated_at TEXT NOT NULL,
-                updated_by INTEGER
-            )
-        ''')
         conn.execute('''
             CREATE TABLE IF NOT EXISTS notifications (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -237,6 +234,7 @@ def _init_db_schema() -> None:
                 FOREIGN KEY (owner_id) REFERENCES users(id)
             )
         ''')
+        _ensure_column(conn, 'collab_sessions', 'source_table_id', 'TEXT')
         conn.execute('''
             CREATE TABLE IF NOT EXISTS collab_members (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -529,298 +527,6 @@ def list_company_colleagues(user_id: int) -> list[dict]:
             (company, user_id),
         ).fetchall()
     return [dict(r) for r in rows]
-
-
-def list_company_members(admin_user_id: int) -> list[dict]:
-    """本公司全员（含管理员本人），供公司后台管理。"""
-    from modules.roles import (
-        get_user_features,
-        get_feature_overrides,
-        get_role_label,
-        get_user_company,
-    )
-
-    init_db()
-    with _connect() as conn:
-        me = conn.execute('SELECT * FROM users WHERE id=?', (admin_user_id,)).fetchone()
-        if not me:
-            return []
-        me_dict = dict(me)
-        company = get_user_company(me_dict)
-        if not company:
-            return []
-        rows = conn.execute(
-            '''SELECT id, username, role, company, created_at, preferences
-               FROM users WHERE company=? ORDER BY
-               CASE WHEN role='company_admin' THEN 0 ELSE 1 END, username''',
-            (company,),
-        ).fetchall()
-    members = []
-    for row in rows:
-        user = dict(row)
-        members.append({
-            'id': user['id'],
-            'username': user['username'],
-            'role': user.get('role') or 'normal_user',
-            'role_label': get_role_label(user.get('role')),
-            'company': user.get('company') or company,
-            'created_at': user.get('created_at') or '',
-            'features': get_user_features(user),
-            'feature_overrides': get_feature_overrides(user),
-            'is_self': int(user['id']) == int(admin_user_id),
-        })
-    return members
-
-
-def admin_update_member(
-    *,
-    admin_id: int,
-    target_id: int,
-    role: str | None = None,
-    feature_overrides: dict | None = None,
-    clear_overrides: bool = False,
-) -> tuple[bool, str, dict | None]:
-    """公司管理员更新同公司成员的岗位与功能覆盖。"""
-    from modules.roles import (
-        ROLES,
-        is_company_admin,
-        same_company,
-        parse_preferences,
-        get_user_features,
-        get_feature_overrides,
-        get_role_label,
-        ALL_FEATURES,
-    )
-
-    init_db()
-    admin = get_user_by_id(admin_id)
-    target = get_user_by_id(target_id)
-    if not admin or not target:
-        return False, '用户不存在', None
-    if not is_company_admin(admin):
-        return False, '仅系统管理员可操作', None
-    if not same_company(admin, target):
-        return False, '只能管理本公司成员', None
-
-    updates: dict = {}
-    if role is not None:
-        role = (role or '').strip()
-        if role not in ROLES:
-            return False, '无效角色', None
-        updates['role'] = role
-
-    prefs = parse_preferences(target.get('preferences'))
-    if clear_overrides:
-        prefs.pop('feature_overrides', None)
-        updates['preferences'] = prefs
-    elif feature_overrides is not None:
-        if not isinstance(feature_overrides, dict):
-            return False, '功能覆盖格式无效', None
-        cleaned: dict[str, bool] = {}
-        for key, val in feature_overrides.items():
-            if key in ALL_FEATURES:
-                cleaned[key] = bool(val)
-        prefs['feature_overrides'] = cleaned
-        updates['preferences'] = prefs
-
-    if not updates:
-        return False, '没有需要更新的字段', None
-
-    ok = update_user_profile(target_id, **updates)
-    if not ok:
-        return False, '更新失败', None
-
-    refreshed = get_user_by_id(target_id)
-    if not refreshed:
-        return False, '更新后无法读取用户', None
-    payload = {
-        'id': refreshed['id'],
-        'username': refreshed['username'],
-        'role': refreshed.get('role') or 'normal_user',
-        'role_label': get_role_label(refreshed.get('role')),
-        'company': refreshed.get('company') or '',
-        'created_at': refreshed.get('created_at') or '',
-        'features': get_user_features(refreshed),
-        'feature_overrides': get_feature_overrides(refreshed),
-        'is_self': int(refreshed['id']) == int(admin_id),
-    }
-    return True, '更新成功', payload
-
-
-def _default_company_features() -> dict[str, bool]:
-    """无配置记录时：默认全部开通，避免影响已有公司。"""
-    from modules.roles import ALL_FEATURES
-    return {k: True for k in ALL_FEATURES}
-
-
-def _ensure_company_settings_table(conn: sqlite3.Connection) -> None:
-    conn.execute('''
-        CREATE TABLE IF NOT EXISTS company_settings (
-            company TEXT PRIMARY KEY,
-            enabled_features TEXT NOT NULL DEFAULT '{}',
-            updated_at TEXT NOT NULL,
-            updated_by INTEGER
-        )
-    ''')
-
-
-def get_company_enabled_features(company: str) -> dict[str, bool]:
-    """读取公司已开通功能；无记录时视为全部开通（不落库）。"""
-    from modules.roles import ALL_FEATURES
-    company = (company or '').strip()
-    if not company:
-        return {k: True for k in ALL_FEATURES}
-    init_db()
-    with _connect() as conn:
-        _ensure_company_settings_table(conn)
-        row = conn.execute(
-            'SELECT enabled_features FROM company_settings WHERE company=?',
-            (company,),
-        ).fetchone()
-        if not row:
-            return _default_company_features()
-        try:
-            raw = json.loads(row['enabled_features'] or '{}')
-        except (json.JSONDecodeError, TypeError):
-            raw = {}
-        # 已有配置：缺省键视为未开通
-        return {k: bool(raw.get(k, False)) for k in ALL_FEATURES}
-
-
-def set_company_enabled_features(
-    company: str,
-    enabled_features: dict,
-    updated_by: int | None = None,
-) -> tuple[bool, str, dict[str, bool]]:
-    """系统管理员更新公司开通功能。"""
-    from modules.roles import ALL_FEATURES
-    company = (company or '').strip()
-    if not company:
-        return False, '公司名称无效', {}
-    if not isinstance(enabled_features, dict):
-        return False, '功能配置格式无效', {}
-    cleaned = {k: bool(enabled_features.get(k, False)) for k in ALL_FEATURES}
-    init_db()
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    with _connect() as conn:
-        _ensure_company_settings_table(conn)
-        conn.execute(
-            '''INSERT INTO company_settings (company, enabled_features, updated_at, updated_by)
-               VALUES (?, ?, ?, ?)
-               ON CONFLICT(company) DO UPDATE SET
-                 enabled_features=excluded.enabled_features,
-                 updated_at=excluded.updated_at,
-                 updated_by=excluded.updated_by''',
-            (company, _json_dumps(cleaned), now, updated_by),
-        )
-        conn.commit()
-    return True, '公司功能已更新', cleaned
-
-
-def get_company_overview(admin_user_id: int) -> dict | None:
-    """公司后台数据概览。"""
-    from modules.roles import (
-        get_user_company,
-        get_role_label,
-        ROLES,
-        ALL_FEATURES,
-        is_company_admin,
-    )
-
-    admin = get_user_by_id(admin_user_id)
-    if not admin or not is_company_admin(admin):
-        return None
-    company = get_user_company(admin)
-    if not company:
-        return None
-
-    init_db()
-    with _connect() as conn:
-        members = conn.execute(
-            '''SELECT id, username, role, created_at FROM users
-               WHERE company=? ORDER BY created_at DESC''',
-            (company,),
-        ).fetchall()
-        member_ids = [int(r['id']) for r in members]
-        role_counts: dict[str, int] = {}
-        for r in members:
-            role = r['role'] or 'normal_user'
-            role_counts[role] = role_counts.get(role, 0) + 1
-
-        history_count = 0
-        message_count = 0
-        voucher_count = 0
-        invoice_count = 0
-        collab_count = 0
-        if member_ids:
-            placeholders = ','.join('?' * len(member_ids))
-            history_count = conn.execute(
-                f'SELECT COUNT(*) AS c FROM history_records WHERE user_id IN ({placeholders})',
-                member_ids,
-            ).fetchone()['c']
-            message_count = conn.execute(
-                f'''SELECT COUNT(*) AS c FROM messages
-                    WHERE sender_id IN ({placeholders}) OR receiver_id IN ({placeholders})''',
-                member_ids + member_ids,
-            ).fetchone()['c']
-            try:
-                voucher_count = conn.execute(
-                    f'SELECT COUNT(*) AS c FROM fin_vouchers WHERE user_id IN ({placeholders})',
-                    member_ids,
-                ).fetchone()['c']
-            except sqlite3.OperationalError:
-                voucher_count = 0
-            try:
-                invoice_count = conn.execute(
-                    f'SELECT COUNT(*) AS c FROM fin_invoices WHERE user_id IN ({placeholders})',
-                    member_ids,
-                ).fetchone()['c']
-            except sqlite3.OperationalError:
-                invoice_count = 0
-            try:
-                collab_count = conn.execute(
-                    f'SELECT COUNT(*) AS c FROM collab_sessions WHERE owner_id IN ({placeholders})',
-                    member_ids,
-                ).fetchone()['c']
-            except sqlite3.OperationalError:
-                collab_count = 0
-
-    enabled = get_company_enabled_features(company)
-    enabled_list = [ALL_FEATURES[k] for k, on in enabled.items() if on]
-    role_breakdown = [
-        {'role': role, 'label': get_role_label(role), 'count': count}
-        for role, count in sorted(role_counts.items(), key=lambda x: -x[1])
-    ]
-    recent_members = [
-        {
-            'id': int(r['id']),
-            'username': r['username'],
-            'role': r['role'] or 'normal_user',
-            'role_label': get_role_label(r['role']),
-            'created_at': r['created_at'] or '',
-        }
-        for r in members[:8]
-    ]
-    return {
-        'company': company,
-        'member_count': len(members),
-        'admin_count': role_counts.get('company_admin', 0),
-        'role_breakdown': role_breakdown,
-        'roles_catalog': ROLES,
-        'stats': {
-            'history_records': int(history_count),
-            'messages': int(message_count),
-            'vouchers': int(voucher_count),
-            'invoices': int(invoice_count),
-            'collab_sessions': int(collab_count),
-            'features_enabled': len(enabled_list),
-            'features_total': len(ALL_FEATURES),
-        },
-        'enabled_features': enabled,
-        'enabled_feature_labels': enabled_list,
-        'recent_members': recent_members,
-    }
-
 
 def get_user_by_username(username: str) -> dict | None:
     init_db()

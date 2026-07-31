@@ -1,0 +1,7 @@
+# CI / 本地质量门禁依赖（不进入生产镜像）
+pytest>=7.0
+pytest-cov>=4.0
+ruff>=0.6
+bandit>=1.7
+pip-audit>=2.6
+diff-cover>=8.0
