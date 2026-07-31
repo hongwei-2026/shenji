@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -79,7 +78,7 @@ def process_message(event: dict) -> dict:
     Returns:
         {'success': bool, 'reply': str, 'reply_type': 'text'|'card'}
     """
-    msg_type = event.get('msg_type', 'text')
+    _msg_type = event.get('msg_type', 'text')
     content = event.get('content', '{}')
 
     # 解析消息内容
@@ -304,8 +303,8 @@ def _get_tenant_token(cfg: dict) -> str | None:
                     'expire_time': time.time() + result.get('expire', 7200) - 300,
                 }
                 return token
-    except Exception:
-        pass
+    except (OSError, TimeoutError, ValueError, KeyError):
+        return None
     return None
 
 

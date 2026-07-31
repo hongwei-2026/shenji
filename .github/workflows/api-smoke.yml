@@ -57,11 +57,11 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"username":"smoke_ci","password":"smoke1234","role":"normal_user","company":"Smoke Co"}' \
             | tee /tmp/register.json
-          grep -q '"success": true' /tmp/register.json
+          python -c "import json; d=json.load(open('/tmp/register.json')); assert d.get('success') is True, d"
 
           curl -sf -c "$COOKIE" -b "$COOKIE" "$BASE/api/history" \
             | tee /tmp/history.json
-          grep -q '"success"' /tmp/history.json
+          python -c "import json; d=json.load(open('/tmp/history.json')); assert d.get('success') is True, d"
 
           # 优先使用仓库示例 CSV；若不存在则用临时样例
           if [ -f "示例财务数据.csv" ]; then
@@ -76,11 +76,11 @@ jobs:
 
           curl -sf -c "$COOKIE" -b "$COOKIE" -X POST -F "files=@${SAMPLE}" \
             "$BASE/api/upload" | tee /tmp/upload.json
-          grep -q '"success": true' /tmp/upload.json
+          python -c "import json; d=json.load(open('/tmp/upload.json')); assert d.get('success') is True, d"
 
           curl -sf -c "$COOKIE" -b "$COOKIE" "$BASE/api/dashboard" \
             | tee /tmp/dashboard.json
-          grep -q '"success": true' /tmp/dashboard.json
+          python -c "import json; d=json.load(open('/tmp/dashboard.json')); assert d.get('success') is True, d"
 
           echo "API smoke passed"
 

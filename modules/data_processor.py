@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import os
-import json
 import hashlib
 from collections import OrderedDict
 from datetime import datetime
@@ -227,8 +226,9 @@ def generate_summary(df: pd.DataFrame) -> dict:
                     'end': valid_dates.max().strftime('%Y-%m-%d'),
                     'days_span': (valid_dates.max() - valid_dates.min()).days,
                 }
-        except Exception:
-            pass
+        except (TypeError, ValueError, OverflowError):
+            # 日期列脏数据时跳过区间统计，不影响主流程
+            summary.pop('date_range', None)
 
     cat_cols = [c for c, t in col_types.items() if t == 'category']
     summary['category_counts'] = {}
@@ -461,7 +461,7 @@ def _parse_text_to_table(text: str) -> list[list[str]]:
     if len(csv_rows) >= 2:
         return csv_rows
 
-    lines = [l.strip() for l in text.split('\n') if l.strip()]
+    lines = [line.strip() for line in text.split('\n') if line.strip()]
     table = []
     for line in lines:
         line = re.sub(r'^\d+\s*', '', line)
@@ -702,7 +702,7 @@ def update_cell(table_id: str, row_idx: int, column: str, value: Any) -> dict:
         if isinstance(col_pos, (slice, list)) or hasattr(col_pos, '__iter__') and not isinstance(col_pos, (str, int)):
             col_pos = int(list(col_pos)[0]) if not isinstance(col_pos, int) else col_pos
         # 允许写入任意文本，避免数值列赋值失败
-        if df.dtypes.iloc[col_pos] != object:
+        if df.dtypes.iloc[col_pos] is not object:
             df[column] = df[column].astype(object)
             col_pos = df.columns.get_loc(column)
         df.iloc[row_idx, col_pos] = value
