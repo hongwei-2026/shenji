@@ -234,6 +234,7 @@ def build_audit_card(title: str, score: dict, findings: list) -> dict:
     Returns:
         飞书卡片 JSON
     """
+    cfg = _load_config()
     risk_color = 'red' if score.get('risk_percentage', 0) > 70 else ('yellow' if score.get('risk_percentage', 0) > 40 else 'green')
     findings_text = '\n'.join(f'- {f}' for f in findings[:5])
     if len(findings) > 5:

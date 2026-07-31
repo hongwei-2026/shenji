@@ -1,0 +1,42 @@
+[tool.ruff]
+target-version = "py310"
+line-length = 120
+extend-exclude = [
+  "static/vendor",
+  "native",
+  "data",
+  "uploads",
+]
+
+[tool.ruff.lint]
+# 全仓强制：会导致运行时失败或明显缺陷
+select = ["E9", "F63", "F7", "F82", "F821"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["F401"]
+
+[tool.ruff.format]
+quote-style = "single"
+
+[tool.coverage.run]
+branch = true
+source = ["app", "modules"]
+omit = [
+  "modules/local_llm.py",
+  "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+precision = 1
+show_missing = true
+skip_covered = true
+fail_under = 17
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --tb=short"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "native", "static"]
+skips = ["B101"]
