@@ -23,3 +23,7 @@ static/downloads/*.AppImage
 static/downloads/*.zip
 static/downloads/*.apk
 static/downloads/*.hap
+.coverage
+coverage.xml
+htmlcov/
+.ruff_cache/
