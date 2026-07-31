@@ -139,7 +139,7 @@ def detect_by_group_zscore(df: pd.DataFrame, amount_col: str = None,
         if len(valid) < 5:
             continue
 
-        z_scores = np.abs(scipy_stats.zscore(valid))
+        z_scores = np.abs(_zscore(valid.to_numpy()))
         anom = valid[z_scores > threshold]
 
         if len(anom) > 0:

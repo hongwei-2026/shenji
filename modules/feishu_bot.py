@@ -4,7 +4,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import time
 from pathlib import Path
 from typing import Any
@@ -79,7 +78,7 @@ def process_message(event: dict) -> dict:
     Returns:
         {'success': bool, 'reply': str, 'reply_type': 'text'|'card'}
     """
-    msg_type = event.get('msg_type', 'text')
+    _msg_type = event.get('msg_type', 'text')
     content = event.get('content', '{}')
 
     # 解析消息内容
@@ -234,6 +233,7 @@ def build_audit_card(title: str, score: dict, findings: list) -> dict:
     Returns:
         飞书卡片 JSON
     """
+    cfg = _load_config()
     risk_color = 'red' if score.get('risk_percentage', 0) > 70 else ('yellow' if score.get('risk_percentage', 0) > 40 else 'green')
     findings_text = '\n'.join(f'- {f}' for f in findings[:5])
     if len(findings) > 5:
@@ -303,8 +303,8 @@ def _get_tenant_token(cfg: dict) -> str | None:
                     'expire_time': time.time() + result.get('expire', 7200) - 300,
                 }
                 return token
-    except Exception:
-        pass
+    except (OSError, TimeoutError, ValueError, KeyError):
+        return None
     return None
 
 
