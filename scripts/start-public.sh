@@ -64,4 +64,5 @@ fi
 
 echo " 日志: $LOG_FILE"
 echo " 停止: bash scripts/stop-public.sh"
+echo " 正式 HTTPS(443): 见 docs/SSL_443.md"
 echo "========================================"

@@ -1854,10 +1854,12 @@ def create_fin_voucher(
     summary: str,
     lines: list[dict],
     auto_post: bool = False,
+    created_by: int | None = None,
 ) -> int:
     init_db()
     ensure_finance_seed(user_id)
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    author = int(created_by or user_id)
     total_debit = sum(float(ln.get('debit') or 0) for ln in lines)
     total_credit = sum(float(ln.get('credit') or 0) for ln in lines)
     with _connect() as conn:
@@ -1875,7 +1877,7 @@ def create_fin_voucher(
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
             (
                 user_id, period_id, voucher_no, voucher_date, summary, status,
-                total_debit, total_credit, user_id, now,
+                total_debit, total_credit, author, now,
                 now if auto_post else None,
             ),
         )
