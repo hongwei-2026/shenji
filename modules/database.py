@@ -52,7 +52,7 @@ def _connect() -> sqlite3.Connection:
         except sqlite3.Error:
             try:
                 conn.close()
-            except Exception:
+            except Exception:  # noqa: S110 - 连接已失效，忽略关闭异常
                 pass
             conn = None
     os.makedirs(DB_DIR, exist_ok=True)

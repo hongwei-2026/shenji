@@ -7,7 +7,6 @@ from __future__ import annotations
 import os
 import io
 import json
-import base64
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -23,7 +22,7 @@ from modules.data_processor import (
     restore_table_from_df, persist_table, restore_working_tables_for_user,
     bind_table_history,
     get_current_data, get_current_summary,
-    get_tables, get_table, get_active_table,
+    get_tables, get_active_table,
     set_active_table, get_active_table_id,
     get_table_data, update_cell, add_row, delete_row,
     add_column, delete_column, delete_table,
@@ -90,7 +89,7 @@ init_db()
 try:
     from modules.enterprise_db import ensure_enterprise_schema
     ensure_enterprise_schema()
-except Exception:
+except Exception:  # noqa: S110 - 企业模块可选，失败不阻断启动
     pass
 
 # AI 仅通过云端 / OpenAI 兼容 API 接入
@@ -764,7 +763,7 @@ def search_page():
     from modules.search_engine import refresh_dynamic_index
     try:
         refresh_dynamic_index(user_id=_uid())
-    except Exception:
+    except Exception:  # noqa: S110 - 搜索索引刷新失败不阻断搜索
         pass
 
     data = search(query, user_id=_uid())
@@ -864,7 +863,7 @@ def api_upload():
         try:
             from modules.search_engine import refresh_dynamic_index
             refresh_dynamic_index(user_id=_uid())
-        except Exception:
+        except Exception:  # noqa: S110 - 索引刷新非关键路径
             pass
     except Exception as e:
         first['auto_analyze_error'] = str(e)
@@ -1014,7 +1013,7 @@ def api_activate_table(table_id):
                 'preview_columns': t['preview_columns'] if t else [],
                 'dashboard_charts': charts,
             }
-        except Exception as e:
+        except Exception:  # noqa: S110 - 图表渲染失败不阻断切换
             pass
 
         return jsonify({'success': True, 'active_table_id': table_id})
@@ -1634,7 +1633,7 @@ def _build_dashboard_charts(df, summary, audit_results, audit_summary):
                                for i in counts.index.astype(str)],
                     'values': [int(x) for x in counts.values],
                 }
-            except Exception:
+            except Exception:  # noqa: S110 - 金额分布可选
                 pass
 
     category_data = None
@@ -1681,7 +1680,7 @@ def _build_dashboard_charts(df, summary, audit_results, audit_summary):
                     'labels': [str(d) for d in daily.index[-60:]],
                     'values': [round(float(v), 2) for v in daily.values[-60:]],
                 }
-        except Exception:
+        except Exception:  # noqa: S110 - 时间趋势可选
             pass
 
     return {
@@ -1808,7 +1807,6 @@ def api_risk_assessment():
     _analysis_cache['phase1_results'] = result
 
     # 同时保存到历史记录
-    history_id = _analysis_cache.get('history_id')
     summary = result.get('summary', {})
     return jsonify({
         'success': True,
@@ -2150,7 +2148,7 @@ def api_profile_update_role():
 @app.route('/api/profile/stats')
 def api_profile_stats():
     """用户数据统计"""
-    from modules.database import list_history, get_friends
+    from modules.database import list_history
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': '未登录'}), 401
@@ -2663,8 +2661,8 @@ def api_list_groups():
     """获取我的群聊列表"""
     from modules.database import list_user_groups, get_group_unread_count
     groups = list_user_groups(_uid())
-    for g in groups:
-        g['unread'] = get_group_unread_count(g['id'], _uid())
+    for grp in groups:
+        grp['unread'] = get_group_unread_count(grp['id'], _uid())
     return jsonify({'success': True, 'groups': groups})
 
 
@@ -3026,7 +3024,7 @@ def api_export_html():
                 message=f'导出 HTML 报告 {timestamp}',
                 author_id=uid,
             )
-        except Exception:
+        except Exception:  # noqa: S110 - 历史记录保存非关键
             pass
     return send_file(
         io.BytesIO(html.encode('utf-8')),
@@ -3491,7 +3489,6 @@ def api_agent_upload():
         return jsonify({'success': False, 'error': '文件名为空'})
 
     ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
-    uid = _uid() or 0
 
     if ext in ('png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'):
         try:
@@ -3802,7 +3799,7 @@ def api_history_load(record_id):
                 record.get('phase2_results'),
                 record.get('phase3_results'),
             )
-        except Exception:
+        except Exception:  # noqa: S110 - 历史保存非关键
             pass
 
     return jsonify({
