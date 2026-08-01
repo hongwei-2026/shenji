@@ -2641,6 +2641,193 @@ def api_call_end():
 
 
 # ============================================================
+# API - 群聊
+# ============================================================
+
+@app.route('/api/groups/create', methods=['POST'])
+def api_create_group():
+    """创建群聊"""
+    from modules.database import create_chat_group
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': '请填写群名称'})
+    member_ids = data.get('member_ids') or []
+    member_ids = [int(x) for x in member_ids if x and int(x) != _uid()]
+    group = create_chat_group(name, _uid(), member_ids)
+    return jsonify({'success': True, 'group': group})
+
+
+@app.route('/api/groups/list')
+def api_list_groups():
+    """获取我的群聊列表"""
+    from modules.database import list_user_groups, get_group_unread_count
+    groups = list_user_groups(_uid())
+    for g in groups:
+        g['unread'] = get_group_unread_count(g['id'], _uid())
+    return jsonify({'success': True, 'groups': groups})
+
+
+@app.route('/api/groups/<int:group_id>/messages')
+def api_group_messages(group_id):
+    """获取群消息"""
+    from modules.database import get_group_messages, is_group_member, mark_group_read
+    if not is_group_member(group_id, _uid()):
+        return jsonify({'success': False, 'error': '您不是该群成员'})
+    mark_group_read(group_id, _uid())
+    msgs = get_group_messages(group_id, limit=100)
+    return jsonify({'success': True, 'messages': msgs})
+
+
+@app.route('/api/groups/<int:group_id>/send', methods=['POST'])
+def api_group_send(group_id):
+    """发送群消息"""
+    from modules.database import send_group_message, is_group_member
+    if not is_group_member(group_id, _uid()):
+        return jsonify({'success': False, 'error': '您不是该群成员'})
+    data = request.get_json(silent=True) or {}
+    content = (data.get('content') or '').strip()
+    if not content:
+        return jsonify({'success': False, 'error': '消息不能为空'})
+    msg_id = send_group_message(group_id, _uid(), content)
+    return jsonify({'success': True, 'message_id': msg_id})
+
+
+@app.route('/api/groups/<int:group_id>/members')
+def api_group_members(group_id):
+    """获取群成员"""
+    from modules.database import get_group_members, is_group_member
+    if not is_group_member(group_id, _uid()):
+        return jsonify({'success': False, 'error': '您不是该群成员'})
+    return jsonify({'success': True, 'members': get_group_members(group_id)})
+
+
+@app.route('/api/groups/<int:group_id>/add-members', methods=['POST'])
+def api_group_add_members(group_id):
+    """添加群成员"""
+    from modules.database import add_group_members, is_group_member, get_group_members
+    if not is_group_member(group_id, _uid()):
+        return jsonify({'success': False, 'error': '您不是该群成员'})
+    data = request.get_json(silent=True) or {}
+    member_ids = [int(x) for x in (data.get('member_ids') or []) if x]
+    count = add_group_members(group_id, member_ids)
+    return jsonify({'success': True, 'added': count, 'members': get_group_members(group_id)})
+
+
+@app.route('/api/groups/<int:group_id>/leave', methods=['POST'])
+def api_group_leave(group_id):
+    """退出群聊"""
+    from modules.database import leave_group
+    leave_group(group_id, _uid())
+    return jsonify({'success': True})
+
+
+@app.route('/api/groups/poll', methods=['POST'])
+def api_groups_poll():
+    """轮询多个群的新消息"""
+    from modules.database import poll_group_messages
+    data = request.get_json(silent=True) or {}
+    last_ids = {int(k): int(v) for k, v in (data.get('last_ids') or {}).items()}
+    msgs = poll_group_messages(_uid(), last_ids)
+    return jsonify({'success': True, 'messages': msgs})
+
+
+# ============================================================
+# API - 多人会议
+# ============================================================
+
+@app.route('/api/meeting/create', methods=['POST'])
+def api_meeting_create():
+    """创建多人会议"""
+    from modules.database import create_meeting
+    data = request.get_json(silent=True) or {}
+    title = (data.get('title') or '').strip() or '多人会议'
+    meeting = create_meeting(title, _uid())
+    return jsonify({'success': True, 'meeting': meeting})
+
+
+@app.route('/api/meeting/<int:meeting_id>/join', methods=['POST'])
+def api_meeting_join(meeting_id):
+    """加入会议"""
+    from modules.database import join_meeting
+    result = join_meeting(meeting_id, _uid())
+    if not result:
+        return jsonify({'success': False, 'error': '会议不存在'})
+    return jsonify({'success': True, **result})
+
+
+@app.route('/api/meeting/<int:meeting_id>/leave', methods=['POST'])
+def api_meeting_leave(meeting_id):
+    """离开会议"""
+    from modules.database import leave_meeting
+    leave_meeting(meeting_id, _uid())
+    return jsonify({'success': True})
+
+
+@app.route('/api/meeting/<int:meeting_id>/participants')
+def api_meeting_participants(meeting_id):
+    """获取会议参与者"""
+    from modules.database import get_meeting_participants
+    return jsonify({'success': True, 'participants': get_meeting_participants(meeting_id)})
+
+
+@app.route('/api/meeting/<int:meeting_id>/signal', methods=['POST'])
+def api_meeting_signal(meeting_id):
+    """发送 WebRTC 信令"""
+    from modules.database import send_meeting_signal
+    data = request.get_json(silent=True) or {}
+    to_user = int(data.get('to_user') or 0)
+    signal_type = data.get('signal_type') or ''
+    payload = data.get('payload') or {}
+    if not to_user or not signal_type:
+        return jsonify({'success': False, 'error': '缺少参数'})
+    sid = send_meeting_signal(meeting_id, _uid(), to_user, signal_type, payload)
+    return jsonify({'success': True, 'signal_id': sid})
+
+
+@app.route('/api/meeting/<int:meeting_id>/poll')
+def api_meeting_poll(meeting_id):
+    """轮询会议信令和参与者"""
+    from modules.database import poll_meeting_signals, get_meeting_participants
+    after_id = request.args.get('after_id', 0, type=int)
+    signals = poll_meeting_signals(meeting_id, _uid(), after_id)
+    participants = get_meeting_participants(meeting_id)
+    return jsonify({
+        'success': True,
+        'signals': signals,
+        'participants': participants,
+        'last_signal_id': signals[-1]['id'] if signals else after_id,
+    })
+
+
+@app.route('/api/meeting/<int:meeting_id>/end', methods=['POST'])
+def api_meeting_end(meeting_id):
+    """结束会议（仅创建者）"""
+    from modules.database import end_meeting
+    ok = end_meeting(meeting_id, _uid())
+    if not ok:
+        return jsonify({'success': False, 'error': '仅会议创建者可结束会议'})
+    return jsonify({'success': True})
+
+
+@app.route('/api/meeting/join-by-code', methods=['POST'])
+def api_meeting_join_by_code():
+    """通过房间码加入会议"""
+    from modules.database import get_meeting_by_code, join_meeting
+    data = request.get_json(silent=True) or {}
+    code = (data.get('code') or '').strip()
+    if not code:
+        return jsonify({'success': False, 'error': '请输入会议码'})
+    meeting = get_meeting_by_code(code)
+    if not meeting:
+        return jsonify({'success': False, 'error': '会议码无效或会议已结束'})
+    result = join_meeting(meeting['id'], _uid())
+    if not result:
+        return jsonify({'success': False, 'error': '加入失败'})
+    return jsonify({'success': True, **result})
+
+
+# ============================================================
 # API - AI 助手增强
 # ============================================================
 

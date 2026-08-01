@@ -38,14 +38,31 @@ DB_PATH = os.path.join(DB_DIR, 'audit_history.db')
 _db_initialized = False
 _init_lock = threading.Lock()
 
+# 线程局部连接池：每个工作线程复用一个 SQLite 连接，避免频繁开关
+_thread_local = threading.local()
+
 
 def _connect() -> sqlite3.Connection:
+    """获取当前线程的 SQLite 连接（线程局部复用，减少连接开销）"""
+    conn = getattr(_thread_local, 'conn', None)
+    if conn is not None:
+        try:
+            conn.execute('SELECT 1')
+            return conn
+        except sqlite3.Error:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            conn = None
     os.makedirs(DB_DIR, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA journal_mode=WAL')
     conn.execute('PRAGMA synchronous=NORMAL')
     conn.execute('PRAGMA busy_timeout=30000')
+    conn.execute('PRAGMA cache_size=-64000')  # 64MB cache
+    _thread_local.conn = conn
     return conn
 
 
@@ -430,6 +447,79 @@ def _init_db_schema() -> None:
         _ensure_column(conn, 'history_records', 'phase3_results', 'TEXT')
         _ensure_column(conn, 'collab_presence', 'editing_row', 'INTEGER')
         _ensure_column(conn, 'collab_presence', 'editing_column', 'TEXT')
+        # --- 群聊 ---
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS chat_groups (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                owner_id INTEGER NOT NULL,
+                avatar TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (owner_id) REFERENCES users(id)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS chat_group_members (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                role TEXT NOT NULL DEFAULT 'member',
+                joined_at TEXT NOT NULL,
+                last_read_msg_id INTEGER DEFAULT 0,
+                FOREIGN KEY (group_id) REFERENCES chat_groups(id),
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(group_id, user_id)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS chat_group_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                group_id INTEGER NOT NULL,
+                sender_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                msg_type TEXT NOT NULL DEFAULT 'text',
+                media_url TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (group_id) REFERENCES chat_groups(id),
+                FOREIGN KEY (sender_id) REFERENCES users(id)
+            )
+        ''')
+        # --- 多人会议 ---
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS meeting_rooms (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                room_code TEXT NOT NULL UNIQUE,
+                title TEXT NOT NULL,
+                creator_id INTEGER NOT NULL,
+                status TEXT NOT NULL DEFAULT 'waiting',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (creator_id) REFERENCES users(id)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS meeting_participants (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                meeting_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                joined_at TEXT NOT NULL,
+                left_at TEXT,
+                FOREIGN KEY (meeting_id) REFERENCES meeting_rooms(id),
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(meeting_id, user_id)
+            )
+        ''')
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS meeting_signals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                meeting_id INTEGER NOT NULL,
+                from_user INTEGER NOT NULL,
+                to_user INTEGER NOT NULL,
+                signal_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (meeting_id) REFERENCES meeting_rooms(id)
+            )
+        ''')
         conn.commit()
 
 
@@ -1909,3 +1999,336 @@ def update_history_table_data(record_id: int, df: pd.DataFrame, user_id: int | N
             )
         conn.commit()
         return cur.rowcount > 0
+
+
+# ---- 群聊 ----
+
+def create_chat_group(name: str, owner_id: int, member_ids: list[int]) -> dict:
+    """创建群聊，自动加入创建者和指定成员，返回群信息。"""
+    init_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    name = name.strip()[:50] or '新群聊'
+    with _connect() as conn:
+        cur = conn.execute(
+            'INSERT INTO chat_groups (name, owner_id, created_at) VALUES (?, ?, ?)',
+            (name, owner_id, now),
+        )
+        group_id = int(cur.lastrowid)
+        conn.execute(
+            'INSERT INTO chat_group_members (group_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)',
+            (group_id, owner_id, 'admin', now),
+        )
+        for uid in member_ids:
+            if uid and uid != owner_id:
+                conn.execute(
+                    'INSERT OR IGNORE INTO chat_group_members (group_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)',
+                    (group_id, uid, 'member', now),
+                )
+        conn.commit()
+    return {'id': group_id, 'name': name, 'owner_id': owner_id}
+
+
+def list_user_groups(user_id: int) -> list[dict]:
+    """获取用户加入的所有群聊。"""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            '''SELECT g.*, gm.role, gm.last_read_msg_id,
+                      (SELECT COUNT(*) FROM chat_group_messages WHERE group_id=g.id) AS msg_count,
+                      (SELECT COUNT(*) FROM chat_group_members WHERE group_id=g.id) AS member_count
+               FROM chat_groups g
+               JOIN chat_group_members gm ON gm.group_id = g.id
+               WHERE gm.user_id = ?
+               ORDER BY g.id DESC''',
+            (user_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_group_members(group_id: int) -> list[dict]:
+    """获取群成员列表。"""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            '''SELECT gm.user_id, gm.role, gm.joined_at, u.username
+               FROM chat_group_members gm
+               JOIN users u ON u.id = gm.user_id
+               WHERE gm.group_id = ?
+               ORDER BY gm.joined_at''',
+            (group_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def is_group_member(group_id: int, user_id: int) -> bool:
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            'SELECT 1 FROM chat_group_members WHERE group_id=? AND user_id=?',
+            (group_id, user_id),
+        ).fetchone()
+    return row is not None
+
+
+def send_group_message(group_id: int, sender_id: int, content: str,
+                       msg_type: str = 'text', media_url: str = '') -> int:
+    """发送群消息，返回消息 ID。"""
+    init_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with _connect() as conn:
+        cur = conn.execute(
+            '''INSERT INTO chat_group_messages (group_id, sender_id, content, msg_type, media_url, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)''',
+            (group_id, sender_id, content, msg_type or 'text', media_url or '', now),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def get_group_messages(group_id: int, limit: int = 100, before_id: int | None = None) -> list[dict]:
+    """获取群消息列表。"""
+    init_db()
+    with _connect() as conn:
+        if before_id:
+            rows = conn.execute(
+                '''SELECT m.*, u.username AS sender_name
+                   FROM chat_group_messages m
+                   JOIN users u ON u.id = m.sender_id
+                   WHERE m.group_id=? AND m.id < ?
+                   ORDER BY m.id DESC LIMIT ?''',
+                (group_id, before_id, limit),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                '''SELECT m.*, u.username AS sender_name
+                   FROM chat_group_messages m
+                   JOIN users u ON u.id = m.sender_id
+                   WHERE m.group_id=?
+                   ORDER BY m.id DESC LIMIT ?''',
+                (group_id, limit),
+            ).fetchall()
+    result = [dict(r) for r in rows]
+    result.reverse()
+    return result
+
+
+def mark_group_read(group_id: int, user_id: int) -> None:
+    """标记群消息已读。"""
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            'SELECT MAX(id) AS mid FROM chat_group_messages WHERE group_id=?',
+            (group_id,),
+        ).fetchone()
+        last_id = row['mid'] if row and row['mid'] else 0
+        conn.execute(
+            'UPDATE chat_group_members SET last_read_msg_id=? WHERE group_id=? AND user_id=?',
+            (last_id, group_id, user_id),
+        )
+        conn.commit()
+
+
+def get_group_unread_count(group_id: int, user_id: int) -> int:
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            '''SELECT COUNT(*) AS cnt FROM chat_group_messages m
+               WHERE m.group_id=? AND m.sender_id!=? AND m.id >
+                 COALESCE((SELECT last_read_msg_id FROM chat_group_members WHERE group_id=? AND user_id=?), 0)''',
+            (group_id, user_id, group_id, user_id),
+        ).fetchone()
+    return int(row['cnt']) if row else 0
+
+
+def poll_group_messages(user_id: int, last_ids: dict[int, int]) -> list[dict]:
+    """轮询多个群的新消息。last_ids: {group_id: last_msg_id}"""
+    init_db()
+    results: list[dict] = []
+    with _connect() as conn:
+        for gid, last_id in last_ids.items():
+            rows = conn.execute(
+                '''SELECT m.*, u.username AS sender_name
+                   FROM chat_group_messages m
+                   JOIN users u ON u.id = m.sender_id
+                   WHERE m.group_id=? AND m.id > ? AND m.sender_id != ?
+                   ORDER BY m.id ASC LIMIT 50''',
+                (gid, last_id, user_id),
+            ).fetchall()
+            results.extend(dict(r) for r in rows)
+    return results
+
+
+def add_group_members(group_id: int, member_ids: list[int]) -> int:
+    """批量添加群成员。"""
+    init_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    count = 0
+    with _connect() as conn:
+        for uid in member_ids:
+            cur = conn.execute(
+                'INSERT OR IGNORE INTO chat_group_members (group_id, user_id, role, joined_at) VALUES (?, ?, ?, ?)',
+                (group_id, uid, 'member', now),
+            )
+            count += cur.rowcount
+        conn.commit()
+    return count
+
+
+def leave_group(group_id: int, user_id: int) -> bool:
+    init_db()
+    with _connect() as conn:
+        cur = conn.execute(
+            'DELETE FROM chat_group_members WHERE group_id=? AND user_id=?',
+            (group_id, user_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+# ---- 多人会议 ----
+
+import secrets as _secrets
+
+
+def create_meeting(title: str, creator_id: int) -> dict:
+    """创建多人会议房间，返回房间信息。"""
+    init_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    room_code = _secrets.token_urlsafe(8)
+    with _connect() as conn:
+        cur = conn.execute(
+            'INSERT INTO meeting_rooms (room_code, title, creator_id, status, created_at) VALUES (?, ?, ?, ?, ?)',
+            (room_code, title.strip()[:80] or '多人会议', creator_id, 'active', now),
+        )
+        meeting_id = int(cur.lastrowid)
+        conn.execute(
+            'INSERT INTO meeting_participants (meeting_id, user_id, joined_at) VALUES (?, ?, ?)',
+            (meeting_id, creator_id, now),
+        )
+        conn.commit()
+    return {'id': meeting_id, 'room_code': room_code, 'title': title, 'creator_id': creator_id}
+
+
+def join_meeting(meeting_id: int, user_id: int) -> dict | None:
+    """加入会议，返回会议信息和当前参与者。"""
+    init_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with _connect() as conn:
+        meeting = conn.execute(
+            'SELECT * FROM meeting_rooms WHERE id=?', (meeting_id,)
+        ).fetchone()
+        if not meeting:
+            return None
+        conn.execute(
+            '''INSERT INTO meeting_participants (meeting_id, user_id, joined_at) VALUES (?, ?, ?)
+               ON CONFLICT(meeting_id, user_id) DO UPDATE SET left_at=NULL''',
+            (meeting_id, user_id, now),
+        )
+        conn.commit()
+        participants = conn.execute(
+            '''SELECT mp.user_id, mp.joined_at, u.username
+               FROM meeting_participants mp
+               JOIN users u ON u.id = mp.user_id
+               WHERE mp.meeting_id=? AND mp.left_at IS NULL
+               ORDER BY mp.joined_at''',
+            (meeting_id,),
+        ).fetchall()
+    return {
+        'meeting': dict(meeting),
+        'participants': [dict(r) for r in participants],
+    }
+
+
+def leave_meeting(meeting_id: int, user_id: int) -> None:
+    init_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with _connect() as conn:
+        conn.execute(
+            'UPDATE meeting_participants SET left_at=? WHERE meeting_id=? AND user_id=? AND left_at IS NULL',
+            (now, meeting_id, user_id),
+        )
+        conn.commit()
+
+
+def get_meeting_participants(meeting_id: int) -> list[dict]:
+    """获取会议当前在线参与者。"""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            '''SELECT mp.user_id, u.username
+               FROM meeting_participants mp
+               JOIN users u ON u.id = mp.user_id
+               WHERE mp.meeting_id=? AND mp.left_at IS NULL''',
+            (meeting_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def send_meeting_signal(meeting_id: int, from_user: int, to_user: int,
+                         signal_type: str, payload: dict) -> int:
+    """存储 WebRTC 信令（offer/answer/ice）。"""
+    init_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with _connect() as conn:
+        cur = conn.execute(
+            '''INSERT INTO meeting_signals (meeting_id, from_user, to_user, signal_type, payload, created_at)
+               VALUES (?, ?, ?, ?, ?, ?)''',
+            (meeting_id, from_user, to_user, signal_type, _json_dumps(payload), now),
+        )
+        conn.commit()
+        return int(cur.lastrowid)
+
+
+def poll_meeting_signals(meeting_id: int, user_id: int, after_id: int = 0) -> list[dict]:
+    """轮询发给当前用户的信令。"""
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            '''SELECT s.*, u.username AS from_name
+               FROM meeting_signals s
+               JOIN users u ON u.id = s.from_user
+               WHERE s.meeting_id=? AND s.to_user=? AND s.id > ?
+               ORDER BY s.id ASC LIMIT 100''',
+            (meeting_id, user_id, after_id),
+        ).fetchall()
+    results = []
+    for r in rows:
+        item = dict(r)
+        try:
+            item['payload'] = json.loads(item.get('payload') or '{}')
+        except Exception:
+            item['payload'] = {}
+        results.append(item)
+    return results
+
+
+def end_meeting(meeting_id: int, user_id: int) -> bool:
+    """结束会议（仅创建者）。"""
+    init_db()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    with _connect() as conn:
+        meeting = conn.execute(
+            'SELECT creator_id FROM meeting_rooms WHERE id=?', (meeting_id,)
+        ).fetchone()
+        if not meeting or meeting['creator_id'] != user_id:
+            return False
+        conn.execute(
+            "UPDATE meeting_rooms SET status='ended' WHERE id=?", (meeting_id,)
+        )
+        conn.execute(
+            'UPDATE meeting_participants SET left_at=? WHERE meeting_id=? AND left_at IS NULL',
+            (now, meeting_id),
+        )
+        conn.execute('DELETE FROM meeting_signals WHERE meeting_id=?', (meeting_id,))
+        conn.commit()
+    return True
+
+
+def get_meeting_by_code(room_code: str) -> dict | None:
+    init_db()
+    with _connect() as conn:
+        row = conn.execute(
+            'SELECT * FROM meeting_rooms WHERE room_code=? AND status=?',
+            (room_code, 'active'),
+        ).fetchone()
+    return dict(row) if row else None

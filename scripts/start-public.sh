@@ -24,13 +24,18 @@ else
   if command -v fuser >/dev/null 2>&1; then
     fuser -k "${PORT}/tcp" 2>/dev/null || true
   fi
+  WORKERS="${WORKERS:-4}"
+  THREADS="${THREADS:-32}"
   nohup gunicorn \
     --bind "0.0.0.0:${PORT}" \
-    --workers 1 \
+    --workers "$WORKERS" \
     --worker-class gthread \
-    --threads 16 \
-    --keep-alive 5 \
+    --threads "$THREADS" \
+    --keep-alive 10 \
     --timeout 300 \
+    --max-requests 1000 \
+    --max-requests-jitter 100 \
+    --graceful-timeout 30 \
     app:app >"$LOG_FILE" 2>&1 &
   echo $! >"$PID_FILE"
   sleep 3
