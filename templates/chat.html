@@ -15,8 +15,25 @@
   <div class="chat-sidebar">
     <div class="chat-sidebar-header d-flex justify-content-between align-items-center">
       <span>会话列表</span>
-      <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#newChatModal" title="发起新对话">
-        <i class="bi bi-plus-lg"></i>
+      <div class="btn-group btn-group-sm">
+        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#startMeetingModal" title="发起会议">
+          <i class="bi bi-camera-video-fill"></i>
+        </button>
+        <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#joinMeetingModal" title="加入会议">
+          <i class="bi bi-box-arrow-in-right"></i>
+        </button>
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newChatModal" title="发起新对话">
+          <i class="bi bi-plus-lg"></i>
+        </button>
+      </div>
+    </div>
+    <!-- 会议操作快捷按钮区 -->
+    <div class="px-2 pt-2 d-flex gap-2">
+      <button type="button" class="btn btn-sm btn-outline-success flex-grow-1" data-bs-toggle="modal" data-bs-target="#startMeetingModal">
+        <i class="bi bi-camera-video"></i> 发起会议
+      </button>
+      <button type="button" class="btn btn-sm btn-outline-primary flex-grow-1" data-bs-toggle="modal" data-bs-target="#joinMeetingModal">
+        <i class="bi bi-people"></i> 加入会议
       </button>
     </div>
     <div id="colleaguesBox" class="px-2 pt-2" style="display:none">
@@ -25,6 +42,18 @@
     </div>
     <div id="conversationList">
       <div class="text-center text-muted py-3">加载中...</div>
+    </div>
+    <!-- 群聊列表区域 -->
+    <div class="chat-group-section px-2 pt-2 border-top">
+      <div class="d-flex justify-content-between align-items-center mb-1">
+        <span class="small text-muted"><i class="bi bi-people-fill"></i> 群聊</span>
+        <button type="button" class="btn btn-sm btn-link p-0" data-bs-toggle="modal" data-bs-target="#createGroupModal" title="创建群聊">
+          <i class="bi bi-plus-square"></i>
+        </button>
+      </div>
+      <div id="groupList">
+        <div class="text-center text-muted small py-2">加载中...</div>
+      </div>
     </div>
   </div>
 
@@ -70,6 +99,10 @@
       </div>
       <div class="modal-body">
         <p class="small text-muted">同公司同事已自动成为好友；也可搜索站内任意用户发消息。</p>
+        <!-- 创建群聊入口 -->
+        <button type="button" class="btn btn-outline-primary w-100 mb-3" data-bs-toggle="modal" data-bs-target="#createGroupModal" data-bs-dismiss="modal">
+          <i class="bi bi-people-fill"></i> 创建群聊
+        </button>
         <div id="modalColleagues" class="list-group mb-3"></div>
         <div class="input-group mb-3">
           <input type="text" id="newChatSearch" class="form-control" placeholder="输入用户名搜索…" onkeypress="if(event.key==='Enter')searchChatUsers()">
@@ -80,9 +113,226 @@
     </div>
   </div>
 </div>
+
+<!-- 创建群聊模态框 -->
+<div class="modal fade" id="createGroupModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-people-fill"></i> 创建群聊</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <label class="form-label">群聊名称</label>
+          <input type="text" id="groupNameInput" class="form-control" placeholder="请输入群聊名称" maxlength="50">
+        </div>
+        <div class="mb-2">
+          <label class="form-label">选择群成员</label>
+          <div class="input-group mb-2">
+            <input type="text" id="groupMemberSearch" class="form-control" placeholder="搜索用户以添加到群聊…" onkeypress="if(event.key==='Enter')searchGroupCandidates()">
+            <button type="button" class="btn btn-primary" onclick="searchGroupCandidates()"><i class="bi bi-search"></i></button>
+          </div>
+        </div>
+        <!-- 同公司同事候选 -->
+        <div id="groupColleagues" class="mb-2"></div>
+        <!-- 搜索结果候选 -->
+        <div id="groupCandidateResults" class="list-group mb-3"></div>
+        <hr>
+        <div class="small text-muted mb-1">已选成员 (<span id="selectedMemberCount">0</span>)</div>
+        <div id="selectedMembers" class="border rounded p-2" style="min-height:48px;max-height:120px;overflow-y:auto">
+          <div class="text-muted small">暂未选择成员</div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" onclick="createGroup()"><i class="bi bi-check-lg"></i> 创建群聊</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 群成员列表模态框 -->
+<div class="modal fade" id="groupMembersModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-people"></i> <span id="groupMembersTitle">群成员</span></h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <button type="button" class="btn btn-outline-primary btn-sm" onclick="openAddMembersUI()">
+            <i class="bi bi-person-plus"></i> 添加成员
+          </button>
+          <button type="button" class="btn btn-outline-danger btn-sm ms-2" onclick="leaveCurrentGroup()">
+            <i class="bi bi-box-arrow-right"></i> 退出群聊
+          </button>
+        </div>
+        <div id="groupMembersList" class="list-group"></div>
+        <!-- 添加成员区域 -->
+        <div id="addMembersArea" style="display:none">
+          <hr>
+          <label class="form-label">搜索用户添加</label>
+          <div class="input-group mb-2">
+            <input type="text" id="addMemberSearch" class="form-control" placeholder="搜索用户名…" onkeypress="if(event.key==='Enter')searchAddMembers()">
+            <button type="button" class="btn btn-primary" onclick="searchAddMembers()"><i class="bi bi-search"></i></button>
+          </div>
+          <div id="addMemberResults" class="list-group mb-2"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 发起会议模态框 -->
+<div class="modal fade" id="startMeetingModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-camera-video-fill"></i> 发起会议</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label">会议标题</label>
+        <input type="text" id="meetingTitleInput" class="form-control" placeholder="请输入会议标题" maxlength="80">
+        <p class="small text-muted mt-2">创建后将生成会议码，可分享给其他同事加入。基于 WebRTC 网状连接，支持多路音视频。</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-success" onclick="createMeeting()"><i class="bi bi-camera-video"></i> 创建并进入</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 加入会议模态框 -->
+<div class="modal fade" id="joinMeetingModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-box-arrow-in-right"></i> 加入会议</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label class="form-label">会议码</label>
+        <input type="text" id="meetingCodeInput" class="form-control" placeholder="请输入会议码" maxlength="20">
+        <p class="small text-muted mt-2">输入同事分享的会议码即可加入会议。</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" onclick="joinMeetingByCode()"><i class="bi bi-people"></i> 加入会议</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 多人会议全屏覆盖层 -->
+<div id="meetingOverlay" class="meeting-overlay" style="display:none">
+  <div class="meeting-header d-flex justify-content-between align-items-center px-3 py-2">
+    <div>
+      <strong id="meetingTitleDisplay"><i class="bi bi-camera-video-fill"></i> 会议</strong>
+      <span class="ms-3 small text-light">会议码：<span id="meetingCodeDisplay" class="badge bg-light text-dark"></span></span>
+      <span class="ms-3 small text-light">参会人：<span id="meetingParticipantCount">0</span></span>
+    </div>
+    <button type="button" class="btn btn-sm btn-light" onclick="toggleParticipantPanel()">
+      <i class="bi bi-people"></i> 参会人员
+    </button>
+  </div>
+  <div class="meeting-body d-flex">
+    <!-- 视频网格区 -->
+    <div id="meetingVideoGrid" class="meeting-video-grid flex-grow-1"></div>
+    <!-- 参会人员侧边栏 -->
+    <div id="meetingParticipantPanel" class="meeting-participant-panel" style="display:none">
+      <div class="px-3 py-2 border-bottom d-flex justify-content-between align-items-center">
+        <strong>参会人员</strong>
+        <button type="button" class="btn btn-sm btn-light" onclick="toggleParticipantPanel()"><i class="bi bi-x-lg"></i></button>
+      </div>
+      <div id="meetingParticipantList" class="list-group list-group-flush"></div>
+    </div>
+  </div>
+  <!-- 控制条 -->
+  <div class="meeting-controls d-flex justify-content-center align-items-center gap-2 px-3 py-2">
+    <button type="button" class="btn btn-secondary meeting-ctrl-btn" id="btnMuteMic" onclick="toggleMeetingMic()" title="静音/取消静音">
+      <i class="bi bi-mic-fill"></i>
+    </button>
+    <button type="button" class="btn btn-secondary meeting-ctrl-btn" id="btnMuteCam" onclick="toggleMeetingCam()" title="关闭/开启摄像头">
+      <i class="bi bi-camera-video-fill"></i>
+    </button>
+    <button type="button" class="btn btn-secondary meeting-ctrl-btn" id="btnShareScreen" onclick="toggleScreenShare()" title="共享屏幕">
+      <i class="bi bi-display"></i>
+    </button>
+    <button type="button" class="btn btn-danger meeting-ctrl-btn" onclick="leaveMeeting()" title="离开会议">
+      <i class="bi bi-telephone-x-fill"></i> 离开
+    </button>
+  </div>
+</div>
 {% endblock %}
 
 {% block extra_scripts %}
+<style>
+/* ===== 群聊相关样式 ===== */
+.chat-group-section { background:#fafbfc; }
+.group-item {
+  display:flex; align-items:center; padding:8px 10px; border-radius:8px;
+  cursor:pointer; transition:background .15s; margin-bottom:4px;
+}
+.group-item:hover { background:#eef1f5; }
+.group-item.active { background:#dbe8ff; }
+.group-item .group-avatar {
+  width:32px; height:32px; border-radius:8px; background:#6c757d; color:#fff;
+  display:flex; align-items:center; justify-content:center; margin-right:8px; font-size:14px;
+}
+.group-item .group-info { flex-grow:1; min-width:0; }
+.group-item .group-info .group-name { font-weight:600; font-size:13px; }
+.group-item .group-info .group-last { color:#6c757d; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px; }
+.group-item .group-meta { font-size:11px; color:#adb5bd; }
+.group-item .badge-unread { background:#dc3545; }
+
+/* 群消息中发送者昵称样式 */
+.group-msg-sender { font-size:11px; color:#6c757d; margin-bottom:2px; font-weight:600; }
+.group-msg-sender.me { color:#0b5ed7; }
+
+/* 群消息头像 */
+.group-msg-avatar {
+  width:24px; height:24px; border-radius:50%; display:inline-flex;
+  align-items:center; justify-content:center; font-size:11px;
+  background:#adb5bd; color:#fff; margin-right:6px; vertical-align:middle;
+}
+
+/* ===== 多人会议覆盖层样式 ===== */
+.meeting-overlay {
+  position:fixed; top:0; left:0; right:0; bottom:0; z-index:10800;
+  background:#1c1f26; color:#fff; display:flex; flex-direction:column;
+}
+.meeting-overlay .meeting-header { background:#11141a; border-bottom:1px solid #2a2e38; }
+.meeting-overlay .meeting-body { flex:1 1 auto; min-height:0; }
+.meeting-overlay .meeting-controls { background:#11141a; border-top:1px solid #2a2e38; }
+
+.meeting-video-grid {
+  display:grid; grid-template-columns:repeat(auto-fit, minmax(280px, 1fr));
+  gap:10px; padding:10px; align-content:start; overflow-y:auto;
+}
+.meeting-video-tile {
+  position:relative; background:#000; border-radius:8px; overflow:hidden;
+  aspect-ratio:16/9; display:flex; align-items:center; justify-content:center;
+}
+.meeting-video-tile video { width:100%; height:100%; object-fit:cover; }
+.meeting-video-tile .tile-label {
+  position:absolute; left:6px; bottom:6px; padding:2px 8px; font-size:12px;
+  background:rgba(0,0,0,.55); color:#fff; border-radius:4px;
+}
+.meeting-video-tile.local video { transform: scaleX(-1); } /* 镜像本地视频 */
+.meeting-video-tile.no-video::before {
+  content:"\F4D7"; font-family:"bootstrap-icons"; font-size:48px; color:#444;
+}
+.meeting-ctrl-btn { width:48px; height:48px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; }
+.meeting-ctrl-btn.active-danger { background:#dc3545 !important; border-color:#dc3545; }
+.meeting-participant-panel {
+  width:260px; background:#11141a; border-left:1px solid #2a2e38; overflow-y:auto; flex-shrink:0;
+}
+.meeting-participant-panel .list-group-item { background:transparent; color:#fff; border-color:#2a2e38; }
+</style>
 <script>
 let currentChatUser = null;
 let currentChatUserId = null;
@@ -90,10 +340,36 @@ let voiceRecorder = null;
 let voiceChunks = [];
 let voiceRecording = false;
 
+/* ===== 群聊状态变量 ===== */
+let currentGroupId = null;          // 当前打开的群聊ID
+let currentGroupName = null;        // 当前群聊名称
+let groupLastMsgIds = {};           // 各群最后一条消息ID，用于增量轮询
+let groupSelectedMembers = [];      // 创建群聊时已选成员 [{id, username}]
+let groupPollTimer = null;          // 群消息轮询定时器
+
+/* ===== 会议状态变量 ===== */
+let meetingLocalStream = null;      // 本地媒体流（摄像头/麦克风）
+let meetingScreenStream = null;     // 屏幕共享流
+let meetingPeerConnections = {};    // 与其他参与者的 PeerConnection {userId: RTCPeerConnection}
+let meetingCurrentId = null;        // 当前会议ID
+let meetingRoomCode = null;         // 当前会议码
+let meetingLastSignalId = 0;        // 上次拿到的最大 signal ID
+let meetingPollTimer = null;        // 会议轮询定时器
+let meetingMicMuted = false;        // 麦克风静音状态
+let meetingCamMuted = false;        // 摄像头关闭状态
+let meetingScreenSharing = false;   // 屏幕共享状态
+const MEETING_RTC_CONFIG = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+
 document.addEventListener('DOMContentLoaded', function() {
   loadConversations();
   loadColleagues();
+  loadGroups();                    // 加载群聊列表
+  loadGroupColleaguesForCreate(); // 加载创建群聊用的同事候选
   setInterval(loadConversations, 5000);
+  // 启动群消息轮询（每 4 秒增量拉取）
+  if (!groupPollTimer) {
+    groupPollTimer = setInterval(pollGroupMessages, 4000);
+  }
   window.onNewChatMessages = function(msgs) {
     if (!currentChatUserId) return;
     const relevant = msgs.filter(m => m.sender_id === currentChatUserId);
@@ -211,6 +487,11 @@ function openChat(username, userId) {
     showToast('无法与自己对话', 'warning');
     return;
   }
+  // 切换到 1 对 1 聊天时清空群聊当前选中状态
+  currentGroupId = null;
+  currentGroupName = null;
+  highlightActiveGroup(null);
+  // 1 对 1 聊天使用共享的输入框 / 消息区
   currentChatUser = username;
   currentChatUserId = userId;
   window.__chatPeerId = userId;
@@ -332,7 +613,20 @@ function formatFileSize(bytes) {
 function sendChatMessage() {
   const input = document.getElementById('chatMessageInput');
   const msg = input.value.trim();
-  if (!msg || !currentChatUserId) return;
+  if (!msg) return;
+  // 优先发送到当前群聊
+  if (currentGroupId) {
+    fetch(`/api/groups/${currentGroupId}/send`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      credentials: 'same-origin',
+      body: JSON.stringify({ content: msg })
+    }).then(r => r.json()).then(d => {
+      if (d.success) { input.value = ''; loadGroupMessages(); }
+      else showToast(d.error || '发送失败', 'error');
+    });
+    return;
+  }
+  if (!currentChatUserId) return;
   fetch('/api/messages/send', {
     method:'POST', headers:{'Content-Type':'application/json'},
     credentials: 'same-origin',
@@ -434,6 +728,753 @@ function previewVideo(url, name) {
   document.body.appendChild(modal);
 }
 
-setInterval(() => { if (currentChatUserId) loadMessages(); }, 3000);
+// 1 对 1 聊天消息轮询（在群聊模式下跳过，群消息走单独的 pollGroupMessages）
+setInterval(() => { if (currentChatUserId && !currentGroupId) loadMessages(); }, 3000);
+
+/* =====================================================
+ * ===== 群聊功能 =====
+ * ===================================================== */
+
+// 加载群聊列表
+function loadGroups() {
+  fetch('/api/groups/list', { credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById('groupList');
+      if (!el) return;
+      if (!d.success || !d.groups.length) {
+        el.innerHTML = '<div class="text-center text-muted small py-2">暂无群聊<br><small>点击 + 创建</small></div>';
+        return;
+      }
+      el.innerHTML = d.groups.map(g => {
+        const initial = (g.name || '#')[0].toUpperCase();
+        const unreadBadge = g.unread > 0 ? `<span class="badge bg-danger ms-1">${g.unread}</span>` : '';
+        return `<div class="group-item ${g.id === currentGroupId ? 'active' : ''}"
+              onclick="openGroup(${g.id}, ${JSON.stringify(g.name)})">
+          <span class="group-avatar">${escapeChatHtml(initial)}</span>
+          <div class="group-info">
+            <div class="group-name">${escapeChatHtml(g.name)}${unreadBadge}</div>
+            <div class="group-last">${escapeChatHtml(g.last_msg || (g.member_count + ' 人'))}</div>
+          </div>
+          <div class="group-meta">${g.member_count || 0}人</div>
+        </div>`;
+      }).join('');
+    })
+    .catch(() => {
+      const el = document.getElementById('groupList');
+      if (el) el.innerHTML = '<div class="text-center text-danger small py-2">群聊加载失败</div>';
+    });
+}
+
+// 高亮当前群聊
+function highlightActiveGroup(gid) {
+  document.querySelectorAll('.group-item').forEach(item => {
+    item.classList.remove('active');
+  });
+  if (gid) {
+    // 通过 onclick 属性匹配；简化处理：用 data 属性更稳，这里依赖重渲染时 active 类
+    const items = document.querySelectorAll('.group-item');
+    items.forEach(item => {
+      const onclick = item.getAttribute('onclick') || '';
+      if (onclick.includes(`openGroup(${gid},`)) item.classList.add('active');
+    });
+  }
+}
+
+// 打开群聊
+function openGroup(groupId, groupName) {
+  currentGroupId = groupId;
+  currentGroupName = groupName;
+  // 进入群聊时清空 1 对 1 聊天状态
+  currentChatUser = null;
+  currentChatUserId = null;
+  window.__chatPeerId = null;
+  highlightActiveGroup(groupId);
+  // 隐藏 1 对 1 视频通话工具栏
+  const callToolbar = document.getElementById('chatCallToolbar');
+  if (callToolbar) callToolbar.style.display = 'none';
+  // 隐藏共享文件区（群聊暂不显示）
+  document.getElementById('sharedFilesArea').style.display = 'none';
+  // 渲染群头部
+  document.getElementById('chatHeader').innerHTML = `
+    <div class="d-flex justify-content-between align-items-center">
+      <div>
+        <strong><i class="bi bi-people-fill"></i> ${escapeChatHtml(groupName)}</strong>
+        <span class="ms-2 small text-muted" id="groupHeaderMeta"></span>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-secondary" onclick="showGroupMembers()">
+        <i class="bi bi-people"></i> 查看成员
+      </button>
+    </div>`;
+  document.getElementById('chatMessages').style.display = 'block';
+  document.getElementById('chatInputArea').style.display = 'block';
+  document.getElementById('chatMessages').innerHTML = '<div class="text-center text-muted py-3">加载群消息...</div>';
+  document.getElementById('chatMessageInput').focus();
+  loadGroupMessages();
+  loadGroups(); // 刷新高亮
+  // 拉取成员数
+  fetch(`/api/groups/${groupId}/members`, { credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(d => {
+      const meta = document.getElementById('groupHeaderMeta');
+      if (meta && d.success) meta.textContent = `${d.members.length} 人`;
+    });
+}
+
+// 加载群消息（全量）
+function loadGroupMessages() {
+  if (!currentGroupId) return;
+  fetch(`/api/groups/${currentGroupId}/messages`, { credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.success) return;
+      const el = document.getElementById('chatMessages');
+      if (!d.messages.length) {
+        el.innerHTML = '<div class="text-center text-muted py-5">群内暂无消息，发条消息打个招呼吧！</div>';
+        return;
+      }
+      const myId = window.__currentUserId;
+      el.innerHTML = d.messages.map(m => {
+        const isMe = m.sender_id === myId;
+        const senderName = isMe ? '我' : (m.sender_name || ('用户' + m.sender_id));
+        const initial = (senderName || '?')[0].toUpperCase();
+        const body = formatMessageContent(m.content, isMe);
+        return `<div class="mb-2 ${isMe ? 'text-end' : ''}">
+          ${isMe ? '' : `<div class="group-msg-sender"><span class="group-msg-avatar">${escapeChatHtml(initial)}</span>${escapeChatHtml(senderName)}</div>`}
+          <div class="d-inline-block p-2 rounded ${isMe ? 'bg-primary text-white' : 'bg-light border'}" style="max-width:70%">
+            ${body}
+          </div>
+          <br><small class="text-muted">${m.created_at||''}</small>
+        </div>`;
+      }).join('');
+      // 更新当前群最后一条消息 ID
+      const lastMsg = d.messages[d.messages.length - 1];
+      if (lastMsg) groupLastMsgIds[currentGroupId] = lastMsg.id;
+      el.scrollTop = el.scrollHeight;
+    });
+}
+
+// 群消息增量轮询
+function pollGroupMessages() {
+  if (Object.keys(groupLastMsgIds).length === 0) return;
+  fetch('/api/groups/poll', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    credentials: 'same-origin',
+    body: JSON.stringify({ last_ids: groupLastMsgIds })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.success || !d.messages || !d.messages.length) return;
+      // 按群分组更新最后 ID
+      d.messages.forEach(m => {
+        const cur = groupLastMsgIds[m.group_id] || 0;
+        if (m.id > cur) groupLastMsgIds[m.group_id] = m.id;
+      });
+      // 如果有当前群的新消息，刷新
+      const currentNew = d.messages.filter(m => m.group_id === currentGroupId);
+      if (currentNew.length) loadGroupMessages();
+      // 如果非当前群有新消息，刷新群列表以更新未读数
+      const otherNew = d.messages.filter(m => m.group_id !== currentGroupId);
+      if (otherNew.length) loadGroups();
+    })
+    .catch(() => {});
+}
+
+// 加载创建群聊用的同公司同事候选
+function loadGroupColleaguesForCreate() {
+  fetch('/api/colleagues', { credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById('groupColleagues');
+      if (!el) return;
+      if (!d.success || !d.colleagues.length) {
+        el.innerHTML = '<div class="small text-muted">暂无同公司同事</div>';
+        return;
+      }
+      el.innerHTML = `<div class="small text-muted mb-1"><i class="bi bi-building"></i> 同公司同事</div>` +
+        d.colleagues.map(u => `
+          <button type="button" class="btn btn-sm btn-outline-secondary me-1 mb-1"
+            onclick="toggleGroupCandidate(${u.id}, ${JSON.stringify(u.username)})">
+            <i class="bi bi-person-plus"></i> ${escapeChatHtml(u.username)}
+          </button>`).join('');
+    });
+}
+
+// 搜索群成员候选
+function searchGroupCandidates() {
+  const q = document.getElementById('groupMemberSearch')?.value?.trim();
+  const box = document.getElementById('groupCandidateResults');
+  if (!q || !box) return;
+  fetch(`/api/users/search?q=${encodeURIComponent(q)}`, { credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.success || !d.users.length) {
+        box.innerHTML = '<div class="text-muted small py-2">未找到用户</div>';
+        return;
+      }
+      box.innerHTML = d.users.map(u => `
+        <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+          onclick="toggleGroupCandidate(${u.id}, ${JSON.stringify(u.username)})">
+          <span><i class="bi bi-person-circle me-2"></i>${escapeChatHtml(u.username)}</span>
+          <span class="badge bg-primary">添加</span>
+        </button>
+      `).join('');
+    });
+}
+
+// 切换候选成员选择状态
+function toggleGroupCandidate(uid, username) {
+  const idx = groupSelectedMembers.findIndex(m => m.id === uid);
+  if (idx >= 0) {
+    groupSelectedMembers.splice(idx, 1);
+  } else {
+    groupSelectedMembers.push({ id: uid, username: username });
+  }
+  renderSelectedMembers();
+}
+
+// 渲染已选成员
+function renderSelectedMembers() {
+  const el = document.getElementById('selectedMembers');
+  const cnt = document.getElementById('selectedMemberCount');
+  if (cnt) cnt.textContent = groupSelectedMembers.length;
+  if (!el) return;
+  if (!groupSelectedMembers.length) {
+    el.innerHTML = '<div class="text-muted small">暂未选择成员</div>';
+    return;
+  }
+  el.innerHTML = groupSelectedMembers.map(m => `
+    <span class="badge bg-primary me-1 mb-1" style="font-size:12px">
+      ${escapeChatHtml(m.username)}
+      <button type="button" class="btn-close btn-close-white ms-1" style="font-size:8px"
+        onclick="toggleGroupCandidate(${m.id}, ${JSON.stringify(m.username)})"></button>
+    </span>`).join('');
+}
+
+// 创建群聊
+function createGroup() {
+  const name = document.getElementById('groupNameInput')?.value?.trim();
+  if (!name) { showToast('请输入群聊名称', 'warning'); return; }
+  if (groupSelectedMembers.length === 0) { showToast('请至少选择一名成员', 'warning'); return; }
+  const memberIds = groupSelectedMembers.map(m => m.id);
+  fetch('/api/groups/create', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    credentials: 'same-origin',
+    body: JSON.stringify({ name: name, member_ids: memberIds })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.success) { showToast(d.error || '创建失败', 'error'); return; }
+      showToast('群聊创建成功', 'success');
+      // 重置表单
+      document.getElementById('groupNameInput').value = '';
+      document.getElementById('groupMemberSearch').value = '';
+      document.getElementById('groupCandidateResults').innerHTML = '';
+      groupSelectedMembers = [];
+      renderSelectedMembers();
+      // 关闭模态框
+      bootstrap.Modal.getInstance(document.getElementById('createGroupModal'))?.hide();
+      // 刷新群列表
+      loadGroups();
+      // 直接打开新创建的群
+      if (d.group && d.group.id) openGroup(d.group.id, d.group.name);
+    })
+    .catch(err => showToast('创建失败: ' + err.message, 'error'));
+}
+
+// 显示群成员模态框
+function showGroupMembers() {
+  if (!currentGroupId) return;
+  document.getElementById('groupMembersTitle').textContent = currentGroupName || '群成员';
+  document.getElementById('addMembersArea').style.display = 'none';
+  document.getElementById('addMemberResults').innerHTML = '';
+  document.getElementById('addMemberSearch').value = '';
+  fetch(`/api/groups/${currentGroupId}/members`, { credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(d => {
+      const el = document.getElementById('groupMembersList');
+      if (!d.success) { el.innerHTML = '<div class="text-muted">加载失败</div>'; return; }
+      el.innerHTML = d.members.map(m => {
+        const isOwner = m.role === 'owner';
+        return `<div class="list-group-item d-flex justify-content-between align-items-center">
+          <span><i class="bi bi-person-circle me-2"></i>${escapeChatHtml(m.username)}${isOwner ? ' <span class="badge bg-warning text-dark ms-1">群主</span>' : ''}</span>
+          <small class="text-muted">${isOwner ? '群主' : '成员'}</small>
+        </div>`;
+      }).join('');
+    });
+  new bootstrap.Modal(document.getElementById('groupMembersModal')).show();
+}
+
+// 切换"添加成员"区域显示
+function openAddMembersUI() {
+  const area = document.getElementById('addMembersArea');
+  area.style.display = area.style.display === 'none' ? 'block' : 'none';
+}
+
+// 搜索用户加入群聊
+function searchAddMembers() {
+  const q = document.getElementById('addMemberSearch')?.value?.trim();
+  const box = document.getElementById('addMemberResults');
+  if (!q || !box) return;
+  fetch(`/api/users/search?q=${encodeURIComponent(q)}`, { credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.success || !d.users.length) {
+        box.innerHTML = '<div class="text-muted small py-2">未找到用户</div>';
+        return;
+      }
+      box.innerHTML = d.users.map(u => `
+        <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
+          onclick="addGroupMember(${u.id}, ${JSON.stringify(u.username)})">
+          <span><i class="bi bi-person-circle me-2"></i>${escapeChatHtml(u.username)}</span>
+          <span class="badge bg-success">加入</span>
+        </button>
+      `).join('');
+    });
+}
+
+// 添加成员到当前群
+function addGroupMember(uid, username) {
+  if (!currentGroupId) return;
+  fetch(`/api/groups/${currentGroupId}/add-members`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    credentials: 'same-origin',
+    body: JSON.stringify({ member_ids: [uid] })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.success) {
+        showToast(`已添加 ${username}`, 'success');
+        showGroupMembers(); // 刷新成员列表
+      } else {
+        showToast(d.error || '添加失败', 'error');
+      }
+    });
+}
+
+// 退出当前群聊
+function leaveCurrentGroup() {
+  if (!currentGroupId) return;
+  if (!confirm('确定要退出该群聊吗？')) return;
+  fetch(`/api/groups/${currentGroupId}/leave`, {
+    method: 'POST', credentials: 'same-origin'
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.success) {
+        showToast('已退出群聊', 'success');
+        bootstrap.Modal.getInstance(document.getElementById('groupMembersModal'))?.hide();
+        delete groupLastMsgIds[currentGroupId];
+        currentGroupId = null;
+        currentGroupName = null;
+        document.getElementById('chatHeader').innerHTML = '<span class="text-muted">选择一个会话开始聊天</span>';
+        document.getElementById('chatMessages').style.display = 'none';
+        document.getElementById('chatInputArea').style.display = 'none';
+        loadGroups();
+      } else {
+        showToast(d.error || '退出失败', 'error');
+      }
+    });
+}
+
+/* =====================================================
+ * ===== 多人会议功能（WebRTC Mesh 拓扑） =====
+ * ===================================================== */
+
+// 创建会议
+function createMeeting() {
+  const title = document.getElementById('meetingTitleInput')?.value?.trim();
+  if (!title) { showToast('请输入会议标题', 'warning'); return; }
+  fetch('/api/meeting/create', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    credentials: 'same-origin',
+    body: JSON.stringify({ title: title })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.success || !d.meeting) { showToast(d.error || '创建会议失败', 'error'); return; }
+      // 关闭创建模态框
+      bootstrap.Modal.getInstance(document.getElementById('startMeetingModal'))?.hide();
+      document.getElementById('meetingTitleInput').value = '';
+      // 进入会议
+      enterMeeting(d.meeting.id, d.meeting.room_code, d.meeting.title);
+    })
+    .catch(err => showToast('创建会议失败: ' + err.message, 'error'));
+}
+
+// 通过会议码加入会议
+function joinMeetingByCode() {
+  const code = document.getElementById('meetingCodeInput')?.value?.trim();
+  if (!code) { showToast('请输入会议码', 'warning'); return; }
+  fetch('/api/meeting/join-by-code', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    credentials: 'same-origin',
+    body: JSON.stringify({ code: code })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.success || !d.meeting) { showToast(d.error || '加入会议失败', 'error'); return; }
+      bootstrap.Modal.getInstance(document.getElementById('joinMeetingModal'))?.hide();
+      document.getElementById('meetingCodeInput').value = '';
+      enterMeeting(d.meeting.id, d.meeting.room_code, d.meeting.title);
+    })
+    .catch(err => showToast('加入会议失败: ' + err.message, 'error'));
+}
+
+// 进入会议（统一入口：创建后 / 通过码加入）
+async function enterMeeting(meetingId, roomCode, title) {
+  meetingCurrentId = meetingId;
+  meetingRoomCode = roomCode;
+  meetingLastSignalId = 0;
+  meetingPeerConnections = {};
+  // 更新头部显示
+  document.getElementById('meetingTitleDisplay').innerHTML = `<i class="bi bi-camera-video-fill"></i> ${escapeChatHtml(title || '会议')}`;
+  document.getElementById('meetingCodeDisplay').textContent = roomCode;
+  // 显示覆盖层
+  document.getElementById('meetingOverlay').style.display = 'flex';
+  // 获取本地媒体流
+  try {
+    meetingLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: { width: 640, height: 480 } });
+  } catch (err) {
+    showToast('无法访问摄像头/麦克风: ' + err.message + '（将仅以语音方式参与）', 'warning');
+    meetingLocalStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }).catch(() => null);
+  }
+  // 渲染本地视频瓦片
+  renderLocalTile();
+  // 加入会议（后端登记）
+  fetch(`/api/meeting/${meetingId}/join`, { method: 'POST', credentials: 'same-origin' })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.success) { showToast(d.error || '加入会议失败', 'error'); leaveMeeting(); return; }
+      // 渲染初始参会人员
+      renderMeetingParticipants(d.participants || []);
+      // 启动轮询（信号 + 参会人员）
+      startMeetingPolling();
+    })
+    .catch(err => {
+      showToast('加入会议请求失败: ' + err.message, 'error');
+      leaveMeeting();
+    });
+}
+
+// 渲染本地视频瓦片
+function renderLocalTile() {
+  const grid = document.getElementById('meetingVideoGrid');
+  // 移除已有本地瓦片
+  const old = grid.querySelector('.meeting-video-tile.local');
+  if (old) old.remove();
+  const tile = document.createElement('div');
+  tile.className = 'meeting-video-tile local' + (meetingLocalStream && meetingLocalStream.getVideoTracks().length ? '' : ' no-video');
+  const video = document.createElement('video');
+  video.autoplay = true; video.muted = true; video.playsInline = true;
+  if (meetingLocalStream) video.srcObject = meetingLocalStream;
+  tile.appendChild(video);
+  const label = document.createElement('div');
+  label.className = 'tile-label';
+  label.textContent = '我（本地）';
+  tile.appendChild(label);
+  grid.insertBefore(tile, grid.firstChild);
+}
+
+// 启动会议轮询
+function startMeetingPolling() {
+  if (meetingPollTimer) clearInterval(meetingPollTimer);
+  // 立即拉取一次
+  pollMeetingSignals();
+  // 每 1.5 秒轮询一次
+  meetingPollTimer = setInterval(pollMeetingSignals, 1500);
+}
+
+// 拉取并处理会议信号 + 参会人员
+async function pollMeetingSignals() {
+  if (!meetingCurrentId) return;
+  try {
+    const url = `/api/meeting/${meetingCurrentId}/poll?after_id=${meetingLastSignalId}`;
+    const r = await fetch(url, { credentials: 'same-origin' });
+    const d = await r.json();
+    if (!d.success) return;
+    // 更新参会人员列表
+    if (d.participants) renderMeetingParticipants(d.participants);
+    // 更新最大信号 ID
+    if (d.last_signal_id && d.last_signal_id > meetingLastSignalId) {
+      meetingLastSignalId = d.last_signal_id;
+    }
+    if (!d.signals || !d.signals.length) return;
+    // 处理每个信号
+    for (const sig of d.signals) {
+      await handleMeetingSignal(sig);
+    }
+  } catch (e) {
+    // 网络异常时静默
+  }
+}
+
+// 处理收到的信令
+async function handleMeetingSignal(sig) {
+  const fromUser = sig.from_user;
+  if (fromUser === window.__currentUserId) return; // 忽略自己发的
+  const payload = typeof sig.payload === 'string' ? JSON.parse(sig.payload) : sig.payload;
+  let pc = meetingPeerConnections[fromUser];
+  if (sig.signal_type === 'offer') {
+    // 收到 offer：创建应答
+    if (!pc) pc = await createPeerConnection(fromUser, /*isInitiator=*/false);
+    await pc.setRemoteDescription(new RTCSessionDescription(payload));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    sendMeetingSignal(fromUser, 'answer', answer);
+  } else if (sig.signal_type === 'answer') {
+    // 收到 answer
+    if (pc) {
+      await pc.setRemoteDescription(new RTCSessionDescription(payload));
+    }
+  } else if (sig.signal_type === 'ice') {
+    // 收到 ICE 候选
+    if (!pc) pc = await createPeerConnection(fromUser, false);
+    try {
+      await pc.addIceCandidate(new RTCIceCandidate(payload));
+    } catch (e) {
+      // 偶发顺序问题，忽略
+    }
+  }
+}
+
+// 发送信令到指定用户
+function sendMeetingSignal(toUser, signalType, payload) {
+  if (!meetingCurrentId) return;
+  fetch(`/api/meeting/${meetingCurrentId}/signal`, {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    credentials: 'same-origin',
+    body: JSON.stringify({ to_user: toUser, signal_type: signalType, payload: payload })
+  }).catch(() => {});
+}
+
+// 创建到某个参与者的 PeerConnection
+async function createPeerConnection(userId, isInitiator) {
+  if (meetingPeerConnections[userId]) return meetingPeerConnections[userId];
+  const pc = new RTCPeerConnection(MEETING_RTC_CONFIG);
+  meetingPeerConnections[userId] = pc;
+  // 添加本地流轨道
+  if (meetingLocalStream) {
+    meetingLocalStream.getTracks().forEach(t => pc.addTrack(t, meetingLocalStream));
+  }
+  // 屏幕共享轨道（如有）也加入
+  if (meetingScreenStream) {
+    meetingScreenStream.getTracks().forEach(t => pc.addTrack(t, meetingScreenStream));
+  }
+  // ICE 候选回调
+  pc.onicecandidate = (event) => {
+    if (event.candidate) {
+      sendMeetingSignal(userId, 'ice', event.candidate);
+    }
+  };
+  // 远端流回调
+  pc.ontrack = (event) => {
+    renderRemoteTile(userId, event.streams[0]);
+  };
+  // 如果是发起方，创建 offer
+  if (isInitiator) {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    sendMeetingSignal(userId, 'offer', offer);
+  }
+  return pc;
+}
+
+// 渲染远端视频瓦片
+function renderRemoteTile(userId, stream) {
+  const grid = document.getElementById('meetingVideoGrid');
+  let tile = document.getElementById('meeting-tile-' + userId);
+  if (!tile) {
+    tile = document.createElement('div');
+    tile.id = 'meeting-tile-' + userId;
+    tile.className = 'meeting-video-tile' + (stream.getVideoTracks().length ? '' : ' no-video');
+    const video = document.createElement('video');
+    video.autoplay = true; video.playsInline = true;
+    tile.appendChild(video);
+    const label = document.createElement('div');
+    label.className = 'tile-label';
+    label.id = 'meeting-tile-label-' + userId;
+    tile.appendChild(label);
+    grid.appendChild(tile);
+  }
+  const video = tile.querySelector('video');
+  if (video && video.srcObject !== stream) video.srcObject = stream;
+  // 尝试用参会人员列表里的名字更新标签
+  const name = (window.__meetingParticipants || {})[userId] || ('用户' + userId);
+  const label = document.getElementById('meeting-tile-label-' + userId);
+  if (label) label.textContent = name;
+}
+
+// 渲染参会人员列表
+function renderMeetingParticipants(participants) {
+  const list = document.getElementById('meetingParticipantList');
+  const cnt = document.getElementById('meetingParticipantCount');
+  if (!participants) return;
+  // 缓存姓名字典
+  const nameMap = {};
+  participants.forEach(p => { nameMap[p.user_id] = p.username; });
+  window.__meetingParticipants = nameMap;
+  if (cnt) cnt.textContent = participants.length;
+  if (list) {
+    list.innerHTML = participants.map(p => {
+      const isMe = p.user_id === window.__currentUserId;
+      return `<div class="list-group-item d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-person-circle me-2"></i>${escapeChatHtml(p.username)}${isMe ? ' <span class="badge bg-info ms-1">我</span>' : ''}</span>
+        <i class="bi bi-mic-fill text-success"></i>
+      </div>`;
+    }).join('');
+  }
+  // 对所有已有连接的远端瓦片更新标签
+  participants.forEach(p => {
+    const label = document.getElementById('meeting-tile-label-' + p.user_id);
+    if (label) label.textContent = p.username + (p.user_id === window.__currentUserId ? '（我）' : '');
+  });
+  // 对于尚未建立连接的参会人员，由我（先在会的人）向新人发起 offer
+  // 此处通过对比：如果列表里有不是我、且没有 PC 的用户，并且我比他先入会（id 更小）则发起
+  // 简化策略：每个用户都尝试为尚无连接的人创建 PC（创建方发起 offer）
+  // 为避免双方都发起 offer 造成冲突：仅当我的 userId 小于对方时主动发起
+  participants.forEach(p => {
+    if (p.user_id === window.__currentUserId) return;
+    if (!meetingPeerConnections[p.user_id]) {
+      const myId = window.__currentUserId;
+      const shouldInitiate = myId < p.user_id;
+      createPeerConnection(p.user_id, shouldInitiate);
+    }
+  });
+}
+
+// 切换参会人员面板
+function toggleParticipantPanel() {
+  const panel = document.getElementById('meetingParticipantPanel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+
+// 静音/取消静音麦克风
+function toggleMeetingMic() {
+  if (!meetingLocalStream) return;
+  meetingMicMuted = !meetingMicMuted;
+  meetingLocalStream.getAudioTracks().forEach(t => t.enabled = !meetingMicMuted);
+  const btn = document.getElementById('btnMuteMic');
+  const icon = btn.querySelector('i');
+  if (meetingMicMuted) {
+    btn.classList.add('active-danger');
+    icon.className = 'bi bi-mic-mute-fill';
+  } else {
+    btn.classList.remove('active-danger');
+    icon.className = 'bi bi-mic-fill';
+  }
+}
+
+// 关闭/开启摄像头
+function toggleMeetingCam() {
+  if (!meetingLocalStream) return;
+  meetingCamMuted = !meetingCamMuted;
+  meetingLocalStream.getVideoTracks().forEach(t => t.enabled = !meetingCamMuted);
+  const btn = document.getElementById('btnMuteCam');
+  const icon = btn.querySelector('i');
+  const localTile = document.querySelector('.meeting-video-tile.local');
+  if (meetingCamMuted) {
+    btn.classList.add('active-danger');
+    icon.className = 'bi bi-camera-video-off-fill';
+    if (localTile) localTile.classList.add('no-video');
+  } else {
+    btn.classList.remove('active-danger');
+    icon.className = 'bi bi-camera-video-fill';
+    if (localTile) localTile.classList.remove('no-video');
+  }
+}
+
+// 共享屏幕
+async function toggleScreenShare() {
+  const btn = document.getElementById('btnShareScreen');
+  const icon = btn.querySelector('i');
+  if (meetingScreenSharing) {
+    // 停止共享
+    if (meetingScreenStream) {
+      meetingScreenStream.getTracks().forEach(t => t.stop());
+      meetingScreenStream = null;
+    }
+    meetingScreenSharing = false;
+    btn.classList.remove('active-danger');
+    icon.className = 'bi bi-display';
+    showToast('已停止共享屏幕', 'info');
+    return;
+  }
+  try {
+    const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+    meetingScreenStream = stream;
+    meetingScreenSharing = true;
+    btn.classList.add('active-danger');
+    icon.className = 'bi bi-display-fill';
+    // 用户在浏览器原生控件停止共享时也要同步状态
+    stream.getVideoTracks()[0].onended = () => {
+      meetingScreenStream = null;
+      meetingScreenSharing = false;
+      btn.classList.remove('active-danger');
+      icon.className = 'bi bi-display';
+    };
+    // 将屏幕共享轨道加入所有已存在的 PC
+    Object.keys(meetingPeerConnections).forEach(uid => {
+      const pc = meetingPeerConnections[uid];
+      stream.getTracks().forEach(t => {
+        try { pc.addTrack(t, stream); } catch (e) {}
+      });
+      // 重新协商
+      renegotiatePeer(parseInt(uid, 10));
+    });
+    showToast('已开始共享屏幕', 'success');
+  } catch (err) {
+    showToast('无法共享屏幕: ' + err.message, 'error');
+  }
+}
+
+// 重新协商（添加轨道后需要重新 offer/answer）
+async function renegotiatePeer(userId) {
+  const pc = meetingPeerConnections[userId];
+  if (!pc) return;
+  try {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    sendMeetingSignal(userId, 'offer', offer);
+  } catch (e) {
+    // 忽略
+  }
+}
+
+// 离开会议
+function leaveMeeting() {
+  // 通知后端
+  if (meetingCurrentId) {
+    fetch(`/api/meeting/${meetingCurrentId}/leave`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+  }
+  // 停止轮询
+  if (meetingPollTimer) { clearInterval(meetingPollTimer); meetingPollTimer = null; }
+  // 关闭所有 PeerConnection
+  Object.values(meetingPeerConnections).forEach(pc => {
+    try { pc.close(); } catch (e) {}
+  });
+  meetingPeerConnections = {};
+  // 关闭本地流
+  if (meetingLocalStream) {
+    meetingLocalStream.getTracks().forEach(t => t.stop());
+    meetingLocalStream = null;
+  }
+  if (meetingScreenStream) {
+    meetingScreenStream.getTracks().forEach(t => t.stop());
+    meetingScreenStream = null;
+  }
+  // 重置状态
+  meetingCurrentId = null;
+  meetingRoomCode = null;
+  meetingLastSignalId = 0;
+  meetingMicMuted = false;
+  meetingCamMuted = false;
+  meetingScreenSharing = false;
+  // 清空 UI
+  document.getElementById('meetingVideoGrid').innerHTML = '';
+  document.getElementById('meetingParticipantList').innerHTML = '';
+  document.getElementById('meetingParticipantCount').textContent = '0';
+  document.getElementById('meetingOverlay').style.display = 'none';
+}
 </script>
 {% endblock %}

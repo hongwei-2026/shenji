@@ -7,7 +7,6 @@ from __future__ import annotations
 import os
 import io
 import json
-import base64
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -23,7 +22,7 @@ from modules.data_processor import (
     restore_table_from_df, persist_table, restore_working_tables_for_user,
     bind_table_history,
     get_current_data, get_current_summary,
-    get_tables, get_table, get_active_table,
+    get_tables, get_active_table,
     set_active_table, get_active_table_id,
     get_table_data, update_cell, add_row, delete_row,
     add_column, delete_column, delete_table,
@@ -90,7 +89,7 @@ init_db()
 try:
     from modules.enterprise_db import ensure_enterprise_schema
     ensure_enterprise_schema()
-except Exception:
+except Exception:  # noqa: S110 - 企业模块可选，失败不阻断启动
     pass
 
 # AI 仅通过云端 / OpenAI 兼容 API 接入
@@ -119,17 +118,75 @@ def _add_cache_headers(response):
 _analysis_cache = {}
 
 # 前端资源版本：每次发版递增，避免老账号浏览器缓存旧 UI
-UI_BUILD = '20260728e'
+UI_BUILD = '20260729b'
+
+# 站点信任信息（可用环境变量覆盖，便于正式部署）
+SITE_INFO = {
+    'site_name': os.environ.get('SITE_NAME', '智能财务审计系统'),
+    'site_tagline': os.environ.get(
+        'SITE_TAGLINE',
+        '面向企业财务与审计团队的智能核算 · 合规审计 · AI 协作平台',
+    ),
+    'company_legal_name': os.environ.get('SITE_COMPANY_NAME', '智能财务科技（演示）'),
+    'company_address': os.environ.get('SITE_COMPANY_ADDRESS', '中国 · 互联网服务'),
+    'demo_video_url': os.environ.get('DEMO_VIDEO_URL', ''),
+    'current_year': str(datetime.now().year),
+}
+
+_LEGAL_ABOUT = """
+<h2>我们是谁</h2>
+<p><strong>智能财务审计系统</strong>面向财务、审计与管理层，提供核算总览、凭证与往来管理、三阶段审计程序、出差费用报销审计、AI 助手与团队协作等能力，帮助组织提升合规效率与风险可见度。</p>
+<h2>产品能力</h2>
+<ul>
+  <li>财务核算：总账、凭证、应收应付、发票、银行对账</li>
+  <li>审计工作台：风险评估、控制测试、实质性程序与可视化仪表盘</li>
+  <li>出差报销审计：超标、缺票、重复报销等规则预警</li>
+  <li>AI 与协作：智能问答、消息、任务与审批</li>
+</ul>
+<h2>联系方式</h2>
+<p>正式部署时请在环境变量中配置公司名称与地址，并通过自有域名 + 443 端口与权威 CA 证书对外提供服务。技术说明见仓库 <code>docs/SSL_443.md</code>。</p>
+"""
+
+_LEGAL_PRIVACY = """
+<h2>1. 信息收集</h2>
+<p>我们可能收集您主动提供的账号信息（用户名、密码哈希、职业角色、公司名称）、业务操作产生的财务与审计数据，以及为保障服务安全所需的基本日志信息。</p>
+<h2>2. 使用目的</h2>
+<p>用于提供系统功能、身份认证、权限控制、审计分析、协作沟通与产品改进。演示账号产生的数据仅供体验，不应用于真实商业决策。</p>
+<h2>3. 存储与安全</h2>
+<p>密码以哈希形式存储。生产环境建议通过 HTTPS（443）与权威机构签发的 SSL 证书传输数据，并限制访问权限、定期备份。</p>
+<h2>4. 共享与披露</h2>
+<p>除法律法规要求或经您明确同意外，我们不会向无关第三方出售或随意披露您的个人与业务数据。</p>
+<h2>5. 您的权利</h2>
+<p>您可申请查询、更正或删除账号相关信息（法律另有规定或审计留痕要求除外）。演示环境数据可能被定期清理。</p>
+<h2>6. 政策更新</h2>
+<p>我们可能适时更新本政策，并在本页面公布更新日期。继续使用即表示知悉更新内容。</p>
+"""
+
+_LEGAL_TERMS = """
+<h2>1. 服务说明</h2>
+<p>本系统提供财务核算、审计分析与协作工具。输出结果仅供内部参考，<strong>不构成正式审计意见或法律意见</strong>。</p>
+<h2>2. 账号责任</h2>
+<p>您应妥善保管账号与密码，不得将账号出借他人。因保管不善导致的损失由您自行承担。</p>
+<h2>3. 合规使用</h2>
+<p>禁止利用本系统从事违法违规活动，或上传侵犯他人权利、含恶意代码的内容。演示入口仅供功能体验，请勿录入真实敏感个人信息或未脱敏的生产经营数据。</p>
+<h2>4. 免责声明</h2>
+<p>在法律允许范围内，我们对因数据质量、网络中断、第三方服务或不可抗力导致的间接损失不承担责任。AI 生成内容可能存在偏差，请人工复核后使用。</p>
+<h2>5. 协议变更</h2>
+<p>我们有权更新本协议，更新后继续使用即视为接受。若不同意，请停止使用并注销账号。</p>
+"""
+
 
 
 @app.context_processor
 def inject_ui_build():
-    return {'ui_build': UI_BUILD}
+    return {'ui_build': UI_BUILD, **SITE_INFO}
+
 
 _PUBLIC_PATHS = {
-    '/login', '/api/auth/login', '/api/auth/register', '/api/auth/roles',
+    '/login', '/api/auth/login', '/api/auth/register', '/api/auth/roles', '/api/auth/demo',
     '/favicon.ico', '/manifest.webmanifest', '/sw.js',
     '/downloads', '/api/downloads', '/api/downloads/harmony-guide',
+    '/privacy', '/terms', '/about',
 }
 
 
@@ -156,6 +213,15 @@ def inject_user_ui():
 
 def _uid() -> int | None:
     return session.get('user_id')
+
+
+def _biz_uid() -> int | None:
+    """同公司业务数据归属（财务账套等工作区）。"""
+    uid = _uid()
+    if not uid:
+        return None
+    from modules.company_scope import resolve_company_workspace_id
+    return resolve_company_workspace_id(uid)
 
 
 def _safe_reply(result: dict) -> str:
@@ -350,6 +416,36 @@ def login_page():
     )
 
 
+@app.route('/privacy')
+def privacy_page():
+    return render_template(
+        'legal.html',
+        page_title='隐私政策',
+        updated_at='2026-07-29',
+        content=_LEGAL_PRIVACY,
+    )
+
+
+@app.route('/terms')
+def terms_page():
+    return render_template(
+        'legal.html',
+        page_title='用户协议',
+        updated_at='2026-07-29',
+        content=_LEGAL_TERMS,
+    )
+
+
+@app.route('/about')
+def about_page():
+    return render_template(
+        'legal.html',
+        page_title='关于我们',
+        updated_at='2026-07-29',
+        content=_LEGAL_ABOUT,
+    )
+
+
 @app.route('/api/auth/login', methods=['POST'])
 def api_auth_login():
     data = request.get_json(silent=True) or {}
@@ -359,6 +455,52 @@ def api_auth_login():
     remember = data.get('remember', True)
     token = login_user(user, remember=remember)
     resp = jsonify({'success': True, 'redirect': data.get('next') or request.args.get('next') or '/'})
+    if token:
+        resp.set_cookie(
+            REMEMBER_COOKIE, token, max_age=REMEMBER_DAYS * 86400,
+            httponly=True, samesite='Lax',
+        )
+    return resp
+
+
+@app.route('/api/auth/demo', methods=['POST'])
+def api_auth_demo():
+    """免注册演示入口：确保演示账号存在并登录。"""
+    from modules.database import get_user_by_username, _connect
+    from modules.auth import hash_password
+
+    demo_user = 'demo'
+    demo_pass = os.environ.get('DEMO_PASSWORD', 'demo1234')
+    user = get_user_by_username(demo_user)
+    if not user:
+        ok, msg, _uid = register_user(demo_user, demo_pass, profile={
+            'role': 'auditor',
+            'theme': 'forest',
+            'page_style': 'classic',
+            'company': '演示体验公司',
+        })
+        if not ok:
+            return jsonify({'success': False, 'error': msg or '无法创建演示账号'}), 400
+        user = get_user_by_username(demo_user)
+    else:
+        ok, msg, user = authenticate_user(demo_user, demo_pass)
+        if not ok:
+            with _connect() as conn:
+                conn.execute(
+                    'UPDATE users SET password_hash=? WHERE username=?',
+                    (hash_password(demo_pass), demo_user),
+                )
+                conn.commit()
+            ok, msg, user = authenticate_user(demo_user, demo_pass)
+            if not ok or not user:
+                return jsonify({'success': False, 'error': '演示账号不可用'}), 400
+
+    token = login_user(user, remember=True)
+    resp = jsonify({
+        'success': True,
+        'redirect': '/finance',
+        'message': '已进入演示环境，请勿录入真实敏感数据',
+    })
     if token:
         resp.set_cookie(
             REMEMBER_COOKIE, token, max_age=REMEMBER_DAYS * 86400,
@@ -621,7 +763,7 @@ def search_page():
     from modules.search_engine import refresh_dynamic_index
     try:
         refresh_dynamic_index(user_id=_uid())
-    except Exception:
+    except Exception:  # noqa: S110 - 搜索索引刷新失败不阻断搜索
         pass
 
     data = search(query, user_id=_uid())
@@ -721,7 +863,7 @@ def api_upload():
         try:
             from modules.search_engine import refresh_dynamic_index
             refresh_dynamic_index(user_id=_uid())
-        except Exception:
+        except Exception:  # noqa: S110 - 索引刷新非关键路径
             pass
     except Exception as e:
         first['auto_analyze_error'] = str(e)
@@ -871,7 +1013,7 @@ def api_activate_table(table_id):
                 'preview_columns': t['preview_columns'] if t else [],
                 'dashboard_charts': charts,
             }
-        except Exception as e:
+        except Exception:  # noqa: S110 - 图表渲染失败不阻断切换
             pass
 
         return jsonify({'success': True, 'active_table_id': table_id})
@@ -961,6 +1103,7 @@ def api_delete_column(table_id, col_name):
 @app.route('/api/finance/overview')
 def api_finance_overview():
     from modules.finance import overview, accounts, vouchers
+    from modules.company_scope import resolve_company_workspace_id
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': '请先登录'})
@@ -970,28 +1113,39 @@ def api_finance_overview():
         **data,
         'accounts': accounts(uid),
         'recent_vouchers': vouchers(uid, limit=8),
+        'shared_workspace': resolve_company_workspace_id(uid) != uid,
     })
 
 
 @app.route('/api/finance/accounts')
 def api_finance_accounts():
     from modules.finance import accounts
+    from modules.company_scope import resolve_company_workspace_id
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': '请先登录'})
-    return jsonify({'success': True, 'accounts': accounts(uid)})
+    return jsonify({
+        'success': True,
+        'accounts': accounts(uid),
+        'shared_workspace': resolve_company_workspace_id(uid) != uid,
+    })
 
 
 @app.route('/api/finance/vouchers', methods=['GET', 'POST'])
 def api_finance_vouchers():
     from modules.finance import vouchers, create_voucher
+    from modules.company_scope import resolve_company_workspace_id
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': '请先登录'})
     if request.method == 'GET':
         status = request.args.get('status')
         limit = request.args.get('limit', 50, type=int)
-        return jsonify({'success': True, 'vouchers': vouchers(uid, limit=limit, status=status)})
+        return jsonify({
+            'success': True,
+            'vouchers': vouchers(uid, limit=limit, status=status),
+            'shared_workspace': resolve_company_workspace_id(uid) != uid,
+        })
     data = request.get_json(silent=True) or {}
     return jsonify(create_voucher(uid, data))
 
@@ -1018,7 +1172,7 @@ def api_finance_submit_approval(voucher_id):
 @app.route('/api/finance/vouchers/<int:voucher_id>/versions')
 def api_voucher_versions(voucher_id):
     from modules.enterprise_db import list_doc_versions
-    uid = _uid()
+    uid = _biz_uid()
     if not uid:
         return jsonify({'success': False, 'error': '请先登录'})
     return jsonify({'success': True, 'versions': list_doc_versions(uid, 'voucher', voucher_id)})
@@ -1027,7 +1181,7 @@ def api_voucher_versions(voucher_id):
 @app.route('/api/finance/vouchers/<int:voucher_id>/versions/<int:version_no>')
 def api_voucher_version(voucher_id, version_no):
     from modules.enterprise_db import get_doc_version
-    uid = _uid()
+    uid = _biz_uid()
     if not uid:
         return jsonify({'success': False, 'error': '请先登录'})
     v = get_doc_version(uid, 'voucher', voucher_id, version_no)
@@ -1036,10 +1190,27 @@ def api_voucher_version(voucher_id, version_no):
     return jsonify({'success': True, 'version': v})
 
 
+@app.route('/api/company/sync')
+def api_company_sync():
+    """同公司业务变更事件流，供前端轮询同步。"""
+    from modules.company_scope import list_company_events, get_user_company_name
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': '请先登录'})
+    since = request.args.get('since_id', 0, type=int)
+    events = list_company_events(uid, since_id=since)
+    return jsonify({
+        'success': True,
+        'company': get_user_company_name(uid),
+        'events': events,
+        'server_time': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+    })
+
+
 @app.route('/api/finance/partners')
 def api_finance_partners():
     from modules.enterprise_db import list_partners
-    uid = _uid()
+    uid = _biz_uid()
     if not uid:
         return jsonify({'success': False, 'error': '请先登录'})
     ptype = request.args.get('type')
@@ -1049,18 +1220,24 @@ def api_finance_partners():
 @app.route('/api/finance/partners', methods=['POST'])
 def api_finance_partners_create():
     from modules.enterprise_db import create_partner
-    uid = _uid()
-    if not uid:
+    from modules.company_scope import emit_company_event
+    uid = _biz_uid()
+    actor = _uid()
+    if not uid or not actor:
         return jsonify({'success': False, 'error': '请先登录'})
     data = request.get_json(silent=True) or {}
-    return jsonify({'success': True, 'partner_id': create_partner(uid, data)})
+    pid = create_partner(uid, data)
+    emit_company_event(actor, 'finance', 'partner_create', f'新增往来单位 {data.get("name") or pid}', ref_type='partner', ref_id=pid)
+    return jsonify({'success': True, 'partner_id': pid})
 
 
 @app.route('/api/finance/invoices', methods=['GET', 'POST'])
 def api_finance_invoices():
     from modules.enterprise_db import list_invoices, create_invoice
-    uid = _uid()
-    if not uid:
+    from modules.company_scope import emit_company_event
+    uid = _biz_uid()
+    actor = _uid()
+    if not uid or not actor:
         return jsonify({'success': False, 'error': '请先登录'})
     if request.method == 'GET':
         inv_type = request.args.get('type')
@@ -1071,26 +1248,32 @@ def api_finance_invoices():
     invs = list_invoices(uid)
     inv = next((x for x in invs if x['id'] == iid), None)
     if inv:
-        save_doc_version(uid, 'invoice', iid, inv, message='开具发票', author_id=uid)
+        save_doc_version(uid, 'invoice', iid, inv, message='开具发票', author_id=actor)
+    emit_company_event(actor, 'invoices', 'create', f'开具发票 #{iid}', ref_type='invoice', ref_id=iid)
     return jsonify({'success': True, 'invoice_id': iid})
 
 
 @app.route('/api/finance/invoices/<int:invoice_id>/pay', methods=['POST'])
 def api_finance_invoice_pay(invoice_id):
     from modules.enterprise_db import record_invoice_payment
-    uid = _uid()
-    if not uid:
+    from modules.company_scope import emit_company_event
+    uid = _biz_uid()
+    actor = _uid()
+    if not uid or not actor:
         return jsonify({'success': False, 'error': '请先登录'})
     data = request.get_json(silent=True) or {}
     record_invoice_payment(uid, invoice_id, float(data.get('amount', 0)))
+    emit_company_event(actor, 'invoices', 'pay', f'发票收款 #{invoice_id}', ref_type='invoice', ref_id=invoice_id)
     return jsonify({'success': True})
 
 
 @app.route('/api/finance/travel-expenses', methods=['GET', 'POST'])
 def api_finance_travel_expenses():
     from modules.enterprise_db import list_travel_claims, create_travel_claim, TRAVEL_CATEGORIES
-    uid = _uid()
-    if not uid:
+    from modules.company_scope import emit_company_event
+    uid = _biz_uid()
+    actor = _uid()
+    if not uid or not actor:
         return jsonify({'success': False, 'error': '请先登录'})
     if request.method == 'GET':
         status = request.args.get('status')
@@ -1111,14 +1294,15 @@ def api_finance_travel_expenses():
     from modules.enterprise_db import get_travel_claim, save_doc_version
     claim = get_travel_claim(uid, cid)
     if claim:
-        save_doc_version(uid, 'travel_claim', cid, claim, message='创建差旅报销单', author_id=uid)
+        save_doc_version(uid, 'travel_claim', cid, claim, message='创建差旅报销单', author_id=actor)
+    emit_company_event(actor, 'travel_expense_audit', 'create', f'差旅报销 {claim.get("claim_no") if claim else cid}', ref_type='travel_claim', ref_id=cid)
     return jsonify({'success': True, 'claim_id': cid, 'claim': claim})
 
 
 @app.route('/api/finance/travel-expenses/<int:claim_id>')
 def api_finance_travel_expense_detail(claim_id):
     from modules.enterprise_db import get_travel_claim
-    uid = _uid()
+    uid = _biz_uid()
     if not uid:
         return jsonify({'success': False, 'error': '请先登录'})
     claim = get_travel_claim(uid, claim_id)
@@ -1130,21 +1314,26 @@ def api_finance_travel_expense_detail(claim_id):
 @app.route('/api/finance/travel-expenses/<int:claim_id>/audit', methods=['POST'])
 def api_finance_travel_expense_audit(claim_id):
     from modules.enterprise_db import run_travel_claim_audit
-    uid = _uid()
-    if not uid:
+    from modules.company_scope import emit_company_event
+    uid = _biz_uid()
+    actor = _uid()
+    if not uid or not actor:
         return jsonify({'success': False, 'error': '请先登录'})
     try:
         result = run_travel_claim_audit(uid, claim_id)
     except ValueError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 400
+    emit_company_event(actor, 'travel_expense_audit', 'audit', f'报销单审计 #{claim_id}', ref_type='travel_claim', ref_id=claim_id)
     return jsonify({'success': True, **result})
 
 
 @app.route('/api/finance/travel-expenses/<int:claim_id>/status', methods=['POST'])
 def api_finance_travel_expense_status(claim_id):
     from modules.enterprise_db import update_travel_claim_status, get_travel_claim
-    uid = _uid()
-    if not uid:
+    from modules.company_scope import emit_company_event
+    uid = _biz_uid()
+    actor = _uid()
+    if not uid or not actor:
         return jsonify({'success': False, 'error': '请先登录'})
     data = request.get_json(silent=True) or {}
     status = (data.get('status') or '').strip()
@@ -1152,13 +1341,14 @@ def api_finance_travel_expense_status(claim_id):
         update_travel_claim_status(uid, claim_id, status, data.get('auditor_note'))
     except ValueError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 400
+    emit_company_event(actor, 'travel_expense_audit', 'status', f'报销单状态→{status} #{claim_id}', ref_type='travel_claim', ref_id=claim_id)
     return jsonify({'success': True, 'claim': get_travel_claim(uid, claim_id)})
 
 
 @app.route('/api/finance/bank/accounts')
 def api_finance_bank_accounts():
     from modules.enterprise_db import list_bank_accounts
-    uid = _uid()
+    uid = _biz_uid()
     if not uid:
         return jsonify({'success': False, 'error': '请先登录'})
     return jsonify({'success': True, 'accounts': list_bank_accounts(uid)})
@@ -1167,7 +1357,7 @@ def api_finance_bank_accounts():
 @app.route('/api/finance/bank/<int:bank_id>/txns')
 def api_finance_bank_txns(bank_id):
     from modules.enterprise_db import list_bank_txns
-    uid = _uid()
+    uid = _biz_uid()
     if not uid:
         return jsonify({'success': False, 'error': '请先登录'})
     return jsonify({'success': True, 'txns': list_bank_txns(bank_id, uid)})
@@ -1176,21 +1366,28 @@ def api_finance_bank_txns(bank_id):
 @app.route('/api/finance/bank/<int:bank_id>/import', methods=['POST'])
 def api_finance_bank_import(bank_id):
     from modules.enterprise_db import import_bank_txns
-    uid = _uid()
-    if not uid:
+    from modules.company_scope import emit_company_event
+    uid = _biz_uid()
+    actor = _uid()
+    if not uid or not actor:
         return jsonify({'success': False, 'error': '请先登录'})
     data = request.get_json(silent=True) or {}
     count = import_bank_txns(uid, bank_id, data.get('txns') or [])
+    emit_company_event(actor, 'reconciliation', 'import', f'导入银行流水 {count} 笔', ref_type='bank', ref_id=bank_id)
     return jsonify({'success': True, 'imported': count})
 
 
 @app.route('/api/finance/bank/<int:bank_id>/reconcile', methods=['POST'])
 def api_finance_bank_reconcile(bank_id):
     from modules.enterprise_db import run_reconciliation
-    uid = _uid()
-    if not uid:
+    from modules.company_scope import emit_company_event
+    uid = _biz_uid()
+    actor = _uid()
+    if not uid or not actor:
         return jsonify({'success': False, 'error': '请先登录'})
-    return jsonify({'success': True, **run_reconciliation(uid, bank_id)})
+    result = run_reconciliation(uid, bank_id)
+    emit_company_event(actor, 'reconciliation', 'run', f'银行对账 #{bank_id}', ref_type='bank', ref_id=bank_id)
+    return jsonify({'success': True, **(result if isinstance(result, dict) else {'result': result})})
 
 
 @app.route('/api/workflow/approvals')
@@ -1436,7 +1633,7 @@ def _build_dashboard_charts(df, summary, audit_results, audit_summary):
                                for i in counts.index.astype(str)],
                     'values': [int(x) for x in counts.values],
                 }
-            except Exception:
+            except Exception:  # noqa: S110 - 金额分布可选
                 pass
 
     category_data = None
@@ -1483,7 +1680,7 @@ def _build_dashboard_charts(df, summary, audit_results, audit_summary):
                     'labels': [str(d) for d in daily.index[-60:]],
                     'values': [round(float(v), 2) for v in daily.values[-60:]],
                 }
-        except Exception:
+        except Exception:  # noqa: S110 - 时间趋势可选
             pass
 
     return {
@@ -1610,7 +1807,6 @@ def api_risk_assessment():
     _analysis_cache['phase1_results'] = result
 
     # 同时保存到历史记录
-    history_id = _analysis_cache.get('history_id')
     summary = result.get('summary', {})
     return jsonify({
         'success': True,
@@ -1952,7 +2148,7 @@ def api_profile_update_role():
 @app.route('/api/profile/stats')
 def api_profile_stats():
     """用户数据统计"""
-    from modules.database import list_history, get_friends
+    from modules.database import list_history
     uid = _uid()
     if not uid:
         return jsonify({'success': False, 'error': '未登录'}), 401
@@ -2443,6 +2639,193 @@ def api_call_end():
 
 
 # ============================================================
+# API - 群聊
+# ============================================================
+
+@app.route('/api/groups/create', methods=['POST'])
+def api_create_group():
+    """创建群聊"""
+    from modules.database import create_chat_group
+    data = request.get_json(silent=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': '请填写群名称'})
+    member_ids = data.get('member_ids') or []
+    member_ids = [int(x) for x in member_ids if x and int(x) != _uid()]
+    group = create_chat_group(name, _uid(), member_ids)
+    return jsonify({'success': True, 'group': group})
+
+
+@app.route('/api/groups/list')
+def api_list_groups():
+    """获取我的群聊列表"""
+    from modules.database import list_user_groups, get_group_unread_count
+    groups = list_user_groups(_uid())
+    for grp in groups:
+        grp['unread'] = get_group_unread_count(grp['id'], _uid())
+    return jsonify({'success': True, 'groups': groups})
+
+
+@app.route('/api/groups/<int:group_id>/messages')
+def api_group_messages(group_id):
+    """获取群消息"""
+    from modules.database import get_group_messages, is_group_member, mark_group_read
+    if not is_group_member(group_id, _uid()):
+        return jsonify({'success': False, 'error': '您不是该群成员'})
+    mark_group_read(group_id, _uid())
+    msgs = get_group_messages(group_id, limit=100)
+    return jsonify({'success': True, 'messages': msgs})
+
+
+@app.route('/api/groups/<int:group_id>/send', methods=['POST'])
+def api_group_send(group_id):
+    """发送群消息"""
+    from modules.database import send_group_message, is_group_member
+    if not is_group_member(group_id, _uid()):
+        return jsonify({'success': False, 'error': '您不是该群成员'})
+    data = request.get_json(silent=True) or {}
+    content = (data.get('content') or '').strip()
+    if not content:
+        return jsonify({'success': False, 'error': '消息不能为空'})
+    msg_id = send_group_message(group_id, _uid(), content)
+    return jsonify({'success': True, 'message_id': msg_id})
+
+
+@app.route('/api/groups/<int:group_id>/members')
+def api_group_members(group_id):
+    """获取群成员"""
+    from modules.database import get_group_members, is_group_member
+    if not is_group_member(group_id, _uid()):
+        return jsonify({'success': False, 'error': '您不是该群成员'})
+    return jsonify({'success': True, 'members': get_group_members(group_id)})
+
+
+@app.route('/api/groups/<int:group_id>/add-members', methods=['POST'])
+def api_group_add_members(group_id):
+    """添加群成员"""
+    from modules.database import add_group_members, is_group_member, get_group_members
+    if not is_group_member(group_id, _uid()):
+        return jsonify({'success': False, 'error': '您不是该群成员'})
+    data = request.get_json(silent=True) or {}
+    member_ids = [int(x) for x in (data.get('member_ids') or []) if x]
+    count = add_group_members(group_id, member_ids)
+    return jsonify({'success': True, 'added': count, 'members': get_group_members(group_id)})
+
+
+@app.route('/api/groups/<int:group_id>/leave', methods=['POST'])
+def api_group_leave(group_id):
+    """退出群聊"""
+    from modules.database import leave_group
+    leave_group(group_id, _uid())
+    return jsonify({'success': True})
+
+
+@app.route('/api/groups/poll', methods=['POST'])
+def api_groups_poll():
+    """轮询多个群的新消息"""
+    from modules.database import poll_group_messages
+    data = request.get_json(silent=True) or {}
+    last_ids = {int(k): int(v) for k, v in (data.get('last_ids') or {}).items()}
+    msgs = poll_group_messages(_uid(), last_ids)
+    return jsonify({'success': True, 'messages': msgs})
+
+
+# ============================================================
+# API - 多人会议
+# ============================================================
+
+@app.route('/api/meeting/create', methods=['POST'])
+def api_meeting_create():
+    """创建多人会议"""
+    from modules.database import create_meeting
+    data = request.get_json(silent=True) or {}
+    title = (data.get('title') or '').strip() or '多人会议'
+    meeting = create_meeting(title, _uid())
+    return jsonify({'success': True, 'meeting': meeting})
+
+
+@app.route('/api/meeting/<int:meeting_id>/join', methods=['POST'])
+def api_meeting_join(meeting_id):
+    """加入会议"""
+    from modules.database import join_meeting
+    result = join_meeting(meeting_id, _uid())
+    if not result:
+        return jsonify({'success': False, 'error': '会议不存在'})
+    return jsonify({'success': True, **result})
+
+
+@app.route('/api/meeting/<int:meeting_id>/leave', methods=['POST'])
+def api_meeting_leave(meeting_id):
+    """离开会议"""
+    from modules.database import leave_meeting
+    leave_meeting(meeting_id, _uid())
+    return jsonify({'success': True})
+
+
+@app.route('/api/meeting/<int:meeting_id>/participants')
+def api_meeting_participants(meeting_id):
+    """获取会议参与者"""
+    from modules.database import get_meeting_participants
+    return jsonify({'success': True, 'participants': get_meeting_participants(meeting_id)})
+
+
+@app.route('/api/meeting/<int:meeting_id>/signal', methods=['POST'])
+def api_meeting_signal(meeting_id):
+    """发送 WebRTC 信令"""
+    from modules.database import send_meeting_signal
+    data = request.get_json(silent=True) or {}
+    to_user = int(data.get('to_user') or 0)
+    signal_type = data.get('signal_type') or ''
+    payload = data.get('payload') or {}
+    if not to_user or not signal_type:
+        return jsonify({'success': False, 'error': '缺少参数'})
+    sid = send_meeting_signal(meeting_id, _uid(), to_user, signal_type, payload)
+    return jsonify({'success': True, 'signal_id': sid})
+
+
+@app.route('/api/meeting/<int:meeting_id>/poll')
+def api_meeting_poll(meeting_id):
+    """轮询会议信令和参与者"""
+    from modules.database import poll_meeting_signals, get_meeting_participants
+    after_id = request.args.get('after_id', 0, type=int)
+    signals = poll_meeting_signals(meeting_id, _uid(), after_id)
+    participants = get_meeting_participants(meeting_id)
+    return jsonify({
+        'success': True,
+        'signals': signals,
+        'participants': participants,
+        'last_signal_id': signals[-1]['id'] if signals else after_id,
+    })
+
+
+@app.route('/api/meeting/<int:meeting_id>/end', methods=['POST'])
+def api_meeting_end(meeting_id):
+    """结束会议（仅创建者）"""
+    from modules.database import end_meeting
+    ok = end_meeting(meeting_id, _uid())
+    if not ok:
+        return jsonify({'success': False, 'error': '仅会议创建者可结束会议'})
+    return jsonify({'success': True})
+
+
+@app.route('/api/meeting/join-by-code', methods=['POST'])
+def api_meeting_join_by_code():
+    """通过房间码加入会议"""
+    from modules.database import get_meeting_by_code, join_meeting
+    data = request.get_json(silent=True) or {}
+    code = (data.get('code') or '').strip()
+    if not code:
+        return jsonify({'success': False, 'error': '请输入会议码'})
+    meeting = get_meeting_by_code(code)
+    if not meeting:
+        return jsonify({'success': False, 'error': '会议码无效或会议已结束'})
+    result = join_meeting(meeting['id'], _uid())
+    if not result:
+        return jsonify({'success': False, 'error': '加入失败'})
+    return jsonify({'success': True, **result})
+
+
+# ============================================================
 # API - AI 助手增强
 # ============================================================
 
@@ -2641,7 +3024,7 @@ def api_export_html():
                 message=f'导出 HTML 报告 {timestamp}',
                 author_id=uid,
             )
-        except Exception:
+        except Exception:  # noqa: S110 - 历史记录保存非关键
             pass
     return send_file(
         io.BytesIO(html.encode('utf-8')),
@@ -3106,7 +3489,6 @@ def api_agent_upload():
         return jsonify({'success': False, 'error': '文件名为空'})
 
     ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else ''
-    uid = _uid() or 0
 
     if ext in ('png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'):
         try:
@@ -3417,7 +3799,7 @@ def api_history_load(record_id):
                 record.get('phase2_results'),
                 record.get('phase3_results'),
             )
-        except Exception:
+        except Exception:  # noqa: S110 - 历史保存非关键
             pass
 
     return jsonify({
