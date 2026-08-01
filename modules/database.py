@@ -45,7 +45,8 @@ _thread_local = threading.local()
 def _connect() -> sqlite3.Connection:
     """获取当前线程的 SQLite 连接（线程局部复用，减少连接开销）"""
     conn = getattr(_thread_local, 'conn', None)
-    if conn is not None:
+    cached_path = getattr(_thread_local, 'path', None)
+    if conn is not None and cached_path == DB_PATH:
         try:
             conn.execute('SELECT 1')
             return conn
@@ -63,6 +64,7 @@ def _connect() -> sqlite3.Connection:
     conn.execute('PRAGMA busy_timeout=30000')
     conn.execute('PRAGMA cache_size=-64000')  # 64MB cache
     _thread_local.conn = conn
+    _thread_local.path = DB_PATH
     return conn
 
 
