@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=应收
+Comment=FinanceOS · 应收账款
+Exec=financeos-open receivables
+Icon=financeos-receivables
+Terminal=false
+Categories=Office;Finance;

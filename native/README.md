@@ -2,6 +2,8 @@
 
 本仓库 `native/` 目录提供 **真正的安装包工程**（WebView / Electron 壳，连接公网服务）。
 
+另见 **FinanceOS Linux 桌面**：[`native/financeos/README.md`](financeos/README.md)（Windows 式桌面壳 + 本机 financeosd + 独立财务应用）。
+
 ## 已可下载（服务器已生成）
 
 放在 `static/downloads/`，页面：`/downloads`

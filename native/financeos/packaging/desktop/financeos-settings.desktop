@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=设置
+Comment=FinanceOS · 设置
+Exec=financeos-open settings
+Icon=financeos-settings
+Terminal=false
+Categories=Settings;

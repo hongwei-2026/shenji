@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=FinanceOS
+Comment=财务操作系统（基于 Linux）
+Exec=/usr/bin/env bash -lc 'exec "$HOME/.local/share/financeos/session/start-financeos.sh"'
+Type=Application
+DesktopNames=FinanceOS

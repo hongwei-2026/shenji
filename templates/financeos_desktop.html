@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FinanceOS</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/financeos-desktop.css') }}?v={{ ui_build|default('13') }}">
+</head>
+<body>
+  <div id="desktop" class="desktop">
+    <header class="desktop-brand">
+      <div class="brand-mark">F</div>
+      <div>
+        <strong>FinanceOS</strong>
+        <small>财务操作系统 · {{ g.current_user.username if g.current_user else '' }}{% if user_role_label %} · {{ user_role_label }}{% endif %}</small>
+      </div>
+    </header>
+
+    <div id="iconGrid" class="icon-grid" aria-label="桌面应用"></div>
+    <div id="windowLayer" class="window-layer"></div>
+
+    <div id="startMenu" class="start-menu" hidden>
+      <div class="start-head">
+        <div>
+          <strong>开始</strong>
+          <div class="start-user">{{ g.current_user.username if g.current_user else '' }}{% if user_company %} · {{ user_company }}{% endif %}</div>
+        </div>
+        <a class="btn-text" href="/logout">退出</a>
+      </div>
+      <div id="startList" class="start-list"></div>
+      <div class="start-foot">
+        <button type="button" id="btnRefresh">刷新应用</button>
+        <a class="btn-text" href="/home">经典界面</a>
+      </div>
+    </div>
+  </div>
+
+  <footer class="taskbar">
+    <button type="button" id="btnStart" class="taskbar-start" title="开始">
+      <span class="start-logo">F</span>
+      <span>开始</span>
+    </button>
+    <div id="taskApps" class="taskbar-apps"></div>
+    <div class="taskbar-tray">
+      <span id="svcDot" class="svc-dot" title="服务状态"></span>
+      <span id="clock"></span>
+    </div>
+  </footer>
+
+  <div id="statusToast" class="toast" hidden></div>
+  <script>
+    window.__FOS_USER = {{ {
+      'username': g.current_user.username if g.current_user else '',
+      'role': g.current_user.role if g.current_user else '',
+    }|tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='js/financeos-desktop.js') }}?v={{ ui_build|default('13') }}"></script>
+</body>
+</html>

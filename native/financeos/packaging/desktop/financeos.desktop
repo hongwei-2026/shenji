@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=FinanceOS
+Comment=财务操作系统桌面
+Exec=financeos-open desktop
+Icon=financeos
+Terminal=false
+Categories=Office;Finance;
+StartupWMClass=FinanceOS

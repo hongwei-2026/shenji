@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "apps": [
+    {"id": "vouchers", "name": "凭证", "path": "/finance/vouchers", "feature": "vouchers", "icon": "journal-text", "category": "finance"},
+    {"id": "receivables", "name": "应收", "path": "/finance/receivables", "feature": "receivables", "icon": "cash-coin", "category": "finance"},
+    {"id": "payables", "name": "应付", "path": "/finance/payables", "feature": "payables", "icon": "credit-card", "category": "finance"},
+    {"id": "invoices", "name": "发票", "path": "/finance/invoices", "feature": "invoices", "icon": "receipt", "category": "finance"},
+    {"id": "audit", "name": "审计", "path": "/dashboard", "feature": "dashboard", "icon": "clipboard2-check", "category": "audit"},
+    {"id": "chat", "name": "消息", "path": "/chat", "feature": "chat", "icon": "chat-left-text", "category": "collab"},
+    {"id": "settings", "name": "设置", "path": "/profile", "feature": null, "icon": "gear", "category": "system"}
+  ]
+}

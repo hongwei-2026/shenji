@@ -1,0 +1,166 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, 'feature/**', 'fix/**', 'ci/**']
+  pull_request:
+    branches: [master, main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    name: Lint & Unit Tests (Py ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Critical lint (ruff)
+        run: ruff check app.py modules tests
+
+      - name: Unit & API tests with coverage
+        run: |
+          pytest tests -v --tb=short \
+            --cov=modules --cov=app \
+            --cov-branch \
+            --cov-report=term-missing:skip-covered \
+            --cov-fail-under=17
+
+      - name: Import smoke
+        run: python -c "from app import app; print('app_ok', app.name)"
+
+  feature-smoke:
+    name: Feature Smoke (register / FinanceOS / upload)
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Start Flask
+        run: |
+          mkdir -p data uploads
+          nohup python app.py > /tmp/flask.log 2>&1 &
+          echo $! > /tmp/flask.pid
+          for i in $(seq 1 40); do
+            if curl -sf http://127.0.0.1:5000/api/financeos/health >/dev/null; then
+              echo "Flask is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Flask failed to start"
+          cat /tmp/flask.log
+          exit 1
+
+      - name: Smoke — health, login UI, register, desktop, upload
+        run: |
+          set -euo pipefail
+          BASE=http://127.0.0.1:5000
+          COOKIE=$(mktemp)
+
+          # 健康检查
+          curl -sf "$BASE/api/financeos/health" | tee /tmp/health.json
+          python -c "import json; d=json.load(open('/tmp/health.json')); assert d.get('success') and d.get('service')=='financeosd', d"
+
+          # 登录页为 FinanceOS
+          curl -sf "$BASE/login" | tee /tmp/login.html >/dev/null
+          grep -q 'FinanceOS' /tmp/login.html
+
+          # 匿名访问桌面应跳转登录
+          code=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/os")
+          test "$code" = "302" -o "$code" = "301"
+
+          # 普通用户可无公司注册
+          curl -sf -c "$COOKIE" -b "$COOKIE" -X POST "$BASE/api/auth/register" \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"ci_fos_user","password":"smoke1234","role":"normal_user","company":"","next":"/os"}' \
+            | tee /tmp/register.json
+          python -c "import json; d=json.load(open('/tmp/register.json')); assert d.get('success') is True, d; assert d.get('redirect')=='/os', d"
+
+          # 职业角色缺公司应失败
+          curl -sf -c /tmp/cookie2 -b /tmp/cookie2 -X POST "$BASE/api/auth/register" \
+            -H 'Content-Type: application/json' \
+            -d '{"username":"ci_acc_fail","password":"smoke1234","role":"accountant","company":""}' \
+            | tee /tmp/reg_fail.json
+          python -c "import json; d=json.load(open('/tmp/reg_fail.json')); assert d.get('success') is False, d"
+
+          # 桌面与应用清单
+          code=$(curl -s -o /tmp/os.html -w '%{http_code}' -b "$COOKIE" "$BASE/os")
+          test "$code" = "200"
+          grep -q 'FinanceOS' /tmp/os.html
+          grep -q 'icon-grid' /tmp/os.html
+
+          curl -sf -b "$COOKIE" "$BASE/api/financeos/apps" | tee /tmp/apps.json
+          python -c "import json; d=json.load(open('/tmp/apps.json')); assert d.get('success') is True, d; assert isinstance(d.get('apps'), list), d; assert any(a['id']=='settings' for a in d['apps']), d"
+
+          # 极简窗口模式
+          curl -sf -b "$COOKIE" "$BASE/profile?chrome=os" | tee /tmp/chrome.html >/dev/null
+          grep -q 'financeos-chrome' /tmp/chrome.html
+
+          # 上传与仪表盘（功能链路）
+          if [ -f "示例财务数据.csv" ]; then
+            SAMPLE="示例财务数据.csv"
+          else
+            SAMPLE=/tmp/sample.csv
+            printf '%s\n' '日期,凭证号,科目,部门,摘要,金额,备注' > "$SAMPLE"
+            for i in $(seq 1 20); do
+              printf '2024-01-%02d,V%03d,办公费,财务部,测试%d,%d.00,\n' "$i" "$i" "$i" "$((1000 + i * 10))" >> "$SAMPLE"
+            done
+          fi
+
+          curl -sf -c "$COOKIE" -b "$COOKIE" -X POST -F "files=@${SAMPLE}" \
+            "$BASE/api/upload" | tee /tmp/upload.json
+          python -c "import json; d=json.load(open('/tmp/upload.json')); assert d.get('success') is True, d"
+
+          # normal_user 无 dashboard 权限时可能 403，允许成功或无权限
+          code=$(curl -s -o /tmp/dashboard.json -w '%{http_code}' -b "$COOKIE" "$BASE/api/dashboard")
+          python -c "
+          import json
+          code=int('${code}')
+          d=json.load(open('/tmp/dashboard.json'))
+          assert code in (200, 403), (code, d)
+          if code==200:
+              assert d.get('success') is True, d
+          print('dashboard_check_ok', code)
+          "
+
+          echo "Feature smoke passed"
+
+      - name: Stop Flask
+        if: always()
+        run: |
+          if [ -f /tmp/flask.pid ]; then kill "$(cat /tmp/flask.pid)" || true; fi
+          cat /tmp/flask.log || true

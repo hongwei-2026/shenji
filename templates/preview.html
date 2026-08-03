@@ -8,7 +8,9 @@
     <p class="page-desc">查看已导入数据的统计摘要与前 100 行明细</p>
   </div>
   <div class="page-actions">
+    {% if user_features.get('dashboard') %}
     <a href="/dashboard" class="btn btn-outline-primary btn-sm"><i class="bi bi-speedometer2"></i> 仪表盘</a>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

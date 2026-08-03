@@ -1,0 +1,36 @@
+{
+  "name": "financeos-desktop",
+  "version": "1.0.0",
+  "description": "FinanceOS Linux desktop shell",
+  "main": "main.js",
+  "author": "FinanceOS",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "start:app": "electron . --app",
+    "dist:linux": "electron-builder --linux AppImage dir --x64"
+  },
+  "build": {
+    "appId": "com.financeos.desktop",
+    "productName": "FinanceOS",
+    "directories": {
+      "output": "../dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "shell/**/*",
+      "package.json"
+    ],
+    "linux": {
+      "target": ["AppImage", "dir"],
+      "category": "Office",
+      "artifactName": "FinanceOS-${version}-Linux.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  }
+}

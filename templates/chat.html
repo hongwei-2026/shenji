@@ -196,11 +196,34 @@
       <div class="modal-body">
         <label class="form-label">会议标题</label>
         <input type="text" id="meetingTitleInput" class="form-control" placeholder="请输入会议标题" maxlength="80">
-        <p class="small text-muted mt-2">创建后将生成会议码，可分享给其他同事加入。基于 WebRTC 网状连接，支持多路音视频。</p>
+        <label class="form-label mt-3">邀请公司同事（可选）</label>
+        <div id="meetingInviteList" class="list-group" style="max-height:220px;overflow:auto">
+          <div class="list-group-item text-muted small">加载同事列表…</div>
+        </div>
+        <p class="small text-muted mt-2">勾选同事后将发送会议码通知；也可创建后分享会议码。</p>
       </div>
       <div class="modal-footer">
         <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
         <button type="button" class="btn btn-success" onclick="createMeeting()"><i class="bi bi-camera-video"></i> 创建并进入</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 会议中邀请同事 -->
+<div class="modal fade" id="inviteMeetingModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-person-plus"></i> 邀请同事入会</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="meetingInviteInCallList" class="list-group" style="max-height:260px;overflow:auto"></div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary" onclick="sendMeetingInvites()"><i class="bi bi-send"></i> 发送邀请</button>
       </div>
     </div>
   </div>
@@ -235,6 +258,9 @@
       <span class="ms-3 small text-light">会议码：<span id="meetingCodeDisplay" class="badge bg-light text-dark"></span></span>
       <span class="ms-3 small text-light">参会人：<span id="meetingParticipantCount">0</span></span>
     </div>
+    <button type="button" class="btn btn-sm btn-light" onclick="showInviteMeetingModal()">
+      <i class="bi bi-person-plus"></i> 邀请同事
+    </button>
     <button type="button" class="btn btn-sm btn-light" onclick="toggleParticipantPanel()">
       <i class="bi bi-people"></i> 参会人员
     </button>
@@ -375,10 +401,20 @@ document.addEventListener('DOMContentLoaded', function() {
     const relevant = msgs.filter(m => m.sender_id === currentChatUserId);
     if (relevant.length) loadMessages();
   };
+  const startMeetingModal = document.getElementById('startMeetingModal');
+  if (startMeetingModal) {
+    startMeetingModal.addEventListener('show.bs.modal', () => {
+      renderMeetingInviteChecklist('meetingInviteList', []);
+    });
+  }
   const params = new URLSearchParams(window.location.search);
   const user = params.get('user');
   const uid = params.get('id');
-  if (user && uid) {
+  const joinMeetingCode = params.get('join_meeting');
+  if (joinMeetingCode) {
+    document.getElementById('meetingCodeInput').value = joinMeetingCode;
+    joinMeetingByCode();
+  } else if (user && uid) {
     const peerId = parseInt(uid, 10);
     if (peerId !== window.__currentUserId) {
       openChat(user, peerId);
@@ -1085,10 +1121,12 @@ function leaveCurrentGroup() {
 function createMeeting() {
   const title = document.getElementById('meetingTitleInput')?.value?.trim();
   if (!title) { showToast('请输入会议标题', 'warning'); return; }
+  const inviteeIds = Array.from(document.querySelectorAll('#meetingInviteList input[type=checkbox]:checked'))
+    .map(el => parseInt(el.value, 10)).filter(Boolean);
   fetch('/api/meeting/create', {
     method: 'POST', headers: {'Content-Type':'application/json'},
     credentials: 'same-origin',
-    body: JSON.stringify({ title: title })
+    body: JSON.stringify({ title: title, invitee_ids: inviteeIds })
   })
     .then(r => r.json())
     .then(d => {
@@ -1096,10 +1134,67 @@ function createMeeting() {
       // 关闭创建模态框
       bootstrap.Modal.getInstance(document.getElementById('startMeetingModal'))?.hide();
       document.getElementById('meetingTitleInput').value = '';
+      if (d.invited && d.invited.length) {
+        showToast(`已邀请 ${d.invited.length} 位同事`, 'success');
+      }
       // 进入会议
       enterMeeting(d.meeting.id, d.meeting.room_code, d.meeting.title);
     })
     .catch(err => showToast('创建会议失败: ' + err.message, 'error'));
+}
+
+function renderMeetingInviteChecklist(containerId, excludeIds) {
+  const box = document.getElementById(containerId);
+  if (!box) return;
+  const exclude = new Set((excludeIds || []).map(Number));
+  Promise.all([
+    fetch('/api/colleagues', { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({})),
+    fetch('/api/friends', { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({})),
+  ]).then(([colRes, friRes]) => {
+    const byId = {};
+    (colRes.colleagues || []).forEach(c => {
+      byId[c.id] = { id: c.id, username: c.username, tag: '同事' };
+    });
+    (friRes.friends || []).forEach(f => {
+      const fid = f.other_id;
+      if (!byId[fid]) byId[fid] = { id: fid, username: f.username, tag: '好友' };
+      else byId[fid].tag = '同事/好友';
+    });
+    const people = Object.values(byId).filter(p => !exclude.has(Number(p.id)));
+    if (!people.length) {
+      box.innerHTML = '<div class="list-group-item text-muted small">暂无同公司同事或好友。请先在个人资料填写相同公司名。</div>';
+      return;
+    }
+    box.innerHTML = people.map(p => `
+      <label class="list-group-item d-flex align-items-center gap-2">
+        <input type="checkbox" class="form-check-input m-0" value="${p.id}">
+        <span>${escapeChatHtml(p.username)} <span class="badge bg-light text-muted">${p.tag}</span></span>
+      </label>`).join('');
+  });
+}
+
+function showInviteMeetingModal() {
+  if (!meetingCurrentId) return;
+  const inCall = Object.keys(window.__meetingParticipants || {}).map(Number);
+  renderMeetingInviteChecklist('meetingInviteInCallList', inCall);
+  new bootstrap.Modal(document.getElementById('inviteMeetingModal')).show();
+}
+
+function sendMeetingInvites() {
+  if (!meetingCurrentId) return;
+  const ids = Array.from(document.querySelectorAll('#meetingInviteInCallList input[type=checkbox]:checked'))
+    .map(el => parseInt(el.value, 10)).filter(Boolean);
+  if (!ids.length) { showToast('请先勾选同事', 'warning'); return; }
+  fetch(`/api/meeting/${meetingCurrentId}/invite`, {
+    method: 'POST',
+    credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ invitee_ids: ids }),
+  }).then(r => r.json()).then(d => {
+    if (!d.success) { showToast(d.error || '邀请失败', 'error'); return; }
+    bootstrap.Modal.getInstance(document.getElementById('inviteMeetingModal'))?.hide();
+    showToast(`已邀请 ${(d.invited || []).length} 人`, 'success');
+  }).catch(err => showToast('邀请失败: ' + err.message, 'error'));
 }
 
 // 通过会议码加入会议

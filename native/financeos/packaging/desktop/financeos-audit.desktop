@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=审计
+Comment=FinanceOS · 审计
+Exec=financeos-open audit
+Icon=financeos-audit
+Terminal=false
+Categories=Office;Finance;

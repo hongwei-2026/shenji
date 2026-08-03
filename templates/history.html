@@ -224,7 +224,8 @@ function loadHistory(id, triggerEl) {
     .then(data => {
       if (data.success) {
         if (typeof showToast === 'function') showToast('历史记录已加载', 'success');
-        window.location.href = '/dashboard';
+        const uf = {{ (user_features|default({}))|tojson }};
+        window.location.href = uf.dashboard ? '/dashboard' : (uf.analysis ? '/analysis' : (uf.preview ? '/preview' : '/'));
       } else {
         setLoading(triggerEl, false);
         if (typeof showToast === 'function') showToast(data.error || '加载失败', 'error');

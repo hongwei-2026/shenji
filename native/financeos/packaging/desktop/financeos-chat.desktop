@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=消息
+Comment=FinanceOS · 消息协作
+Exec=financeos-open chat
+Icon=financeos-chat
+Terminal=false
+Categories=Network;Office;

@@ -1,0 +1,200 @@
+:root {
+  --accent: #0f766e;
+  --accent-2: #14b8a6;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --paper: #f8fafc;
+  font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+body.fos-login-body {
+  color: #fff;
+  background:
+    radial-gradient(1000px 500px at 10% 0%, rgba(20,184,166,.28), transparent 55%),
+    radial-gradient(800px 480px at 100% 100%, rgba(59,130,246,.22), transparent 50%),
+    linear-gradient(155deg, #0b1220, #1e293b 50%, #0f172a);
+}
+
+.fos-login-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  max-width: 1100px;
+  margin: 0 auto;
+  gap: 24px;
+  padding: 32px 20px;
+  align-items: center;
+}
+
+.fos-login-hero { padding: 12px 8px; }
+.fos-login-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.fos-mark {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  font-weight: 800;
+  font-size: 22px;
+  background: linear-gradient(145deg, var(--accent-2), var(--accent));
+  color: #042f2e;
+  box-shadow: 0 12px 30px rgba(0,0,0,.28);
+}
+.fos-login-brand strong { display: block; font-size: 22px; }
+.fos-login-brand small { color: rgba(255,255,255,.7); }
+.fos-login-hero h1 {
+  margin: 0 0 12px;
+  font-size: clamp(1.6rem, 3vw, 2.2rem);
+  line-height: 1.25;
+  font-weight: 700;
+}
+.fos-login-hero > p {
+  margin: 0 0 20px;
+  color: rgba(255,255,255,.78);
+  line-height: 1.6;
+  max-width: 36em;
+}
+.fos-points {
+  list-style: none;
+  margin: 0 0 24px;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+.fos-points li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: rgba(255,255,255,.88);
+}
+.fos-points i { color: var(--accent-2); }
+
+.fos-demo-btn {
+  border: 0;
+  border-radius: 12px;
+  padding: 14px 18px;
+  background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  color: #042f2e;
+  font-weight: 700;
+  font-size: 15px;
+  cursor: pointer;
+  box-shadow: 0 12px 28px rgba(15,118,110,.35);
+}
+.fos-demo-btn:hover { filter: brightness(1.05); }
+.fos-demo-btn:disabled { opacity: .7; cursor: wait; }
+.fos-demo-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: rgba(255,255,255,.55);
+}
+
+.fos-login-panel {
+  background: rgba(248,250,252,.97);
+  color: var(--ink);
+  border-radius: 18px;
+  padding: 28px 24px 20px;
+  box-shadow: 0 20px 50px rgba(0,0,0,.3);
+}
+
+.fos-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+.fos-tabs button {
+  border: 0;
+  background: transparent;
+  padding: 10px 14px;
+  cursor: pointer;
+  color: var(--muted);
+  font-weight: 600;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.fos-tabs button.is-active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.fos-form {
+  display: grid;
+  gap: 12px;
+}
+.fos-form label {
+  display: grid;
+  gap: 6px;
+  font-size: 13px;
+  color: #334155;
+  font-weight: 600;
+}
+.fos-form input,
+.fos-form select {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 11px 12px;
+  font-size: 14px;
+  background: #fff;
+}
+.fos-form input:focus,
+.fos-form select:focus {
+  outline: 2px solid rgba(15,118,110,.25);
+  border-color: var(--accent);
+}
+.fos-check {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500 !important;
+}
+.fos-primary {
+  border: 0;
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--ink);
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 4px;
+}
+.fos-primary:hover { background: #1e293b; }
+.fos-primary:disabled { opacity: .6; cursor: wait; }
+
+.fos-hint { margin: 0; font-size: 12px; color: var(--muted); line-height: 1.45; }
+.fos-alert {
+  background: #fef2f2;
+  color: #b91c1c;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.fos-alert.ok {
+  background: #ecfdf5;
+  color: #047857;
+  border-color: #a7f3d0;
+}
+.fos-req { color: #dc2626; font-weight: 700; }
+.fos-foot {
+  margin: 18px 0 0;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+.fos-foot a { color: var(--accent); text-decoration: none; }
+
+@media (max-width: 860px) {
+  .fos-login-shell {
+    grid-template-columns: 1fr;
+    padding: 20px 16px 32px;
+  }
+}
