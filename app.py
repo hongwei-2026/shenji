@@ -118,7 +118,7 @@ def _add_cache_headers(response):
 _analysis_cache = {}
 
 # 前端资源版本：每次发版递增，避免老账号浏览器缓存旧 UI
-UI_BUILD = '20260803fos'
+UI_BUILD = '20260804win11'
 
 # 站点信任信息（可用环境变量覆盖，便于正式部署）
 SITE_INFO = {
@@ -728,6 +728,11 @@ def api_financeos_apps():
             'name': a['name'],
             'description': a.get('description', ''),
             'icon': a.get('icon', 'app'),
+            'glyph': a.get('glyph') or (a.get('name') or '?')[:1],
+            'color': a.get('color', '#0078d4'),
+            'pinned': bool(a.get('pinned')),
+            'kind': a.get('kind') or 'app',
+            'aliases': a.get('aliases') or [],
             'category': a.get('category', 'system'),
             'category_label': CATEGORY_LABELS.get(a.get('category', ''), a.get('category', '')),
             'path': a.get('path'),
@@ -737,6 +742,7 @@ def api_financeos_apps():
         payload.append(item)
     return jsonify({
         'success': True,
+        'brand': 'FinanceOS',
         'apps': payload,
         'user': {
             'id': user.get('id') if user else None,
@@ -748,13 +754,79 @@ def api_financeos_apps():
 
 @app.route('/api/financeos/health')
 def api_financeos_health():
-    return jsonify({'success': True, 'service': 'financeosd', 'os_chrome': bool(g.get('os_chrome'))})
+    search_engine = 'SQLite FTS5'
+    try:
+        from modules import meilisearch_engine as meili
+        st = meili.status()
+        if st.get('meilisearch'):
+            search_engine = 'Meilisearch'
+        elif meili.ensure_server():
+            search_engine = 'Meilisearch'
+            try:
+                meili.sync_index(user_id=_uid() if g.get('current_user') else None)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return jsonify({
+        'success': True,
+        'service': 'financeosd',
+        'os_chrome': bool(g.get('os_chrome')),
+        'brand': 'FinanceOS',
+        'search_engine': search_engine,
+        'browser_engines': ['blink', 'gecko'],
+    })
 
 
 @app.route('/os')
 def financeos_desktop_page():
-    """浏览器可视化 FinanceOS 桌面（图标 / 开始菜单 / 窗口）。"""
+    """FinanceOS desktop (Win11-style)."""
     return render_template('financeos_desktop.html')
+
+
+@app.route('/browser')
+def financeos_browser_page():
+    """双内核浏览器：Blink + Gecko。"""
+    return render_template('financeos_browser.html')
+
+
+@app.route('/api/browser/home')
+def api_browser_home():
+    from modules.browser_engine import HOME_HTML
+    return HOME_HTML, 200, {'Content-Type': 'text/html; charset=utf-8'}
+
+
+@app.route('/api/browser/gecko')
+def api_browser_gecko():
+    """Gecko 内核：Firefox UA 抓取并净化渲染。"""
+    from modules.browser_engine import fetch_gecko, normalize_url
+    raw = request.args.get('url') or ''
+    url = normalize_url(raw)
+    if url.startswith('about:'):
+        from modules.browser_engine import HOME_HTML
+        return jsonify({'success': True, 'engine': 'gecko', 'url': url, 'title': '主页', 'html': HOME_HTML})
+    if url.startswith('/'):
+        return jsonify({'success': False, 'error': '站内地址请使用 Blink 或直接打开应用', 'engine': 'gecko'})
+    return jsonify(fetch_gecko(url))
+
+
+@app.route('/api/search/engine')
+def api_search_engine_status():
+    try:
+        from modules import meilisearch_engine as meili
+        return jsonify({'success': True, **meili.status()})
+    except Exception as e:
+        return jsonify({'success': False, 'engine': 'SQLite FTS5', 'error': str(e)})
+
+
+@app.route('/api/search/reindex', methods=['POST'])
+def api_search_reindex():
+    try:
+        from modules import meilisearch_engine as meili
+        result = meili.sync_index(user_id=_uid())
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 
 @app.route('/downloads')
@@ -832,17 +904,23 @@ def agent_develop_page():
 
 @app.route('/search')
 def search_page():
-    """站内搜索：开源 SQLite FTS5 全文检索（无第三方搜索 API）。"""
+    """站内搜索：优先 Meilisearch，回退 SQLite FTS5。"""
     from modules.search_engine import search
 
     query = (request.args.get('q') or '').strip()
     if not query:
-        return redirect(url_for('index'))
+        query = '财务'
 
     from modules.search_engine import refresh_dynamic_index
     try:
         refresh_dynamic_index(user_id=_uid())
     except Exception:  # noqa: S110 - 搜索索引刷新失败不阻断搜索
+        pass
+    try:
+        from modules import meilisearch_engine as meili
+        if meili.ensure_server():
+            meili.sync_index(user_id=_uid())
+    except Exception:
         pass
 
     data = search(query, user_id=_uid())
@@ -852,7 +930,7 @@ def search_page():
         results=data.get('results') or [],
         search_ok=data.get('success', False),
         search_error=data.get('error'),
-        search_engine=data.get('engine', 'SQLite FTS5'),
+        search_engine=data.get('engine', 'Meilisearch'),
         search_note=data.get('engine_note', ''),
     )
 

@@ -253,8 +253,8 @@ def _history_search(user_id: int | None, query: str, limit: int) -> list[dict]:
 
 def search(query: str, user_id: int | None = None, limit: int = 20) -> dict:
     """
-    开源全文检索入口。
-    引擎：SQLite FTS5（内置，离线可用）
+    全文检索入口。
+    优先 Meilisearch；不可用时回退 SQLite FTS5。
     """
     query = (query or '').strip()
     if not query:
@@ -263,8 +263,26 @@ def search(query: str, user_id: int | None = None, limit: int = 20) -> dict:
             'query': '',
             'results': [],
             'error': '请输入搜索关键词',
-            'engine': 'SQLite FTS5',
+            'engine': 'Meilisearch',
         }
+
+    try:
+        from modules import meilisearch_engine as meili
+        meili_hit = meili.search(query, user_id=user_id, limit=limit)
+        if meili_hit is not None:
+            # 补充历史记录命中
+            extra = _history_search(user_id, query, limit=5)
+            seen = {r['title'] for r in meili_hit.get('results') or []}
+            for item in extra:
+                if item['title'] in seen:
+                    continue
+                meili_hit.setdefault('results', []).append(item)
+                seen.add(item['title'])
+            meili_hit['total'] = len(meili_hit.get('results') or [])
+            meili_hit['success'] = bool(meili_hit.get('results'))
+            return meili_hit
+    except Exception:
+        pass
 
     fts_limit = max(limit - 5, 8)
     results = _fts_search(query, fts_limit, user_id=user_id)
@@ -288,5 +306,5 @@ def search(query: str, user_id: int | None = None, limit: int = 20) -> dict:
         'results': unique,
         'total': len(unique),
         'engine': 'SQLite FTS5',
-        'engine_note': 'SQLite FTS5 + BM25 相关性排序，已索引知识库、历史记录与上传数据',
+        'engine_note': 'Meilisearch 不可用，已回退 SQLite FTS5 + BM25',
     }

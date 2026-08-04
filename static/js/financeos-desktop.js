@@ -1,41 +1,38 @@
 (() => {
-  const ICON_GLYPH = {
-    'journal-text': '记',
-    'cash-coin': '收',
-    'credit-card': '付',
-    receipt: '票',
-    'clipboard2-check': '审',
-    'chat-left-text': '讯',
-    gear: '设',
-  };
-
   const FALLBACK = [
-    { id: 'vouchers', name: '凭证', description: '记账凭证', path: '/finance/vouchers', icon: 'journal-text', category_label: '财务' },
-    { id: 'receivables', name: '应收', description: '应收账款', path: '/finance/receivables', icon: 'cash-coin', category_label: '财务' },
-    { id: 'payables', name: '应付', description: '应付账款', path: '/finance/payables', icon: 'credit-card', category_label: '财务' },
-    { id: 'invoices', name: '发票', description: '发票管理', path: '/finance/invoices', icon: 'receipt', category_label: '财务' },
-    { id: 'audit', name: '审计', description: '审计概览', path: '/dashboard', icon: 'clipboard2-check', category_label: '审计' },
-    { id: 'chat', name: '消息', description: '即时消息', path: '/chat', icon: 'chat-left-text', category_label: '协作' },
-    { id: 'settings', name: '设置', description: '个人设置', path: '/profile', icon: 'gear', category_label: '系统' },
+    { id: 'browser', name: 'Browser', aliases: ['浏览器', 'browser'], path: '/browser', glyph: 'B', color: '#0078d4', pinned: true, kind: 'browser' },
+    { id: 'ai-agent', name: 'AI Agent', aliases: ['agent', '助手'], path: '/agent', glyph: 'AI', color: '#6366f1', pinned: true },
+    { id: 'finance', name: 'Finance', aliases: ['财务', '财务总览'], path: '/finance', glyph: 'F', color: '#0078d4', pinned: true },
+    { id: 'audit', name: 'Audit', aliases: ['审计', '审计概览'], path: '/dashboard', glyph: 'A', color: '#1d4ed8', pinned: true },
+    { id: 'chat', name: 'Chat', aliases: ['消息', '聊天'], path: '/chat', glyph: 'C', color: '#059669', pinned: true },
+    { id: 'settings', name: 'Settings', aliases: ['设置'], path: '/profile', glyph: 'S', color: '#64748b' },
   ];
 
   let apps = [];
   let zTop = 10;
   const windows = new Map();
+  let recognition = null;
 
   function toast(msg) {
     const el = document.getElementById('statusToast');
     el.textContent = msg;
     el.hidden = false;
     clearTimeout(toast._t);
-    toast._t = setTimeout(() => { el.hidden = true; }, 2400);
+    toast._t = setTimeout(() => { el.hidden = true; }, 2200);
   }
 
   function glyph(app) {
-    return ICON_GLYPH[app.icon] || (app.name || '?').slice(0, 1);
+    return app.glyph || (app.name || '?').slice(0, 1);
+  }
+
+  function color(app) {
+    return app.color || '#0078d4';
   }
 
   function appUrl(app) {
+    if (app.kind === 'browser' || (app.path || '').startsWith('/browser')) {
+      return app.path || '/browser';
+    }
     if (app.url && app.url.startsWith('http')) return app.url;
     const path = app.url || app.path || '/';
     const sep = path.includes('?') ? '&' : '?';
@@ -43,9 +40,11 @@
   }
 
   function tickClock() {
-    document.getElementById('clock').textContent = new Date().toLocaleTimeString('zh-CN', {
+    const now = new Date();
+    document.getElementById('clock').textContent = now.toLocaleTimeString('zh-CN', {
       hour: '2-digit', minute: '2-digit',
     });
+    document.getElementById('clockDate').textContent = now.toLocaleDateString('zh-CN');
   }
 
   async function checkHealth() {
@@ -67,12 +66,10 @@
         return;
       }
       const data = await res.json();
-      if (!data.success) throw new Error(data.error || '加载失败');
+      if (!data.success) throw new Error(data.error || 'failed');
       apps = data.apps || [];
-      if (!apps.length) toast('当前账号暂无可用应用');
-    } catch (e) {
+    } catch {
       apps = FALLBACK.slice();
-      toast('应用列表加载失败，显示默认图标');
     }
     render();
   }
@@ -80,8 +77,7 @@
   function focusWin(id) {
     windows.forEach((w, wid) => {
       w.el.classList.toggle('active', wid === id);
-      const btn = document.querySelector(`.task-btn[data-id="${wid}"]`);
-      if (btn) btn.classList.toggle('active', wid === id);
+      document.querySelector(`.task-btn[data-id="${wid}"]`)?.classList.toggle('active', wid === id);
     });
     const w = windows.get(id);
     if (!w) return;
@@ -97,7 +93,8 @@
     btn.type = 'button';
     btn.className = 'task-btn';
     btn.dataset.id = app.id;
-    btn.textContent = app.name;
+    btn.title = app.name;
+    btn.innerHTML = `<span class="tb-glyph" style="background:${color(app)}">${glyph(app)}</span>`;
     btn.onclick = () => {
       const w = windows.get(app.id);
       if (!w) return openApp(app);
@@ -123,23 +120,23 @@
       focusWin(app.id);
       return;
     }
-
     const layer = document.getElementById('windowLayer');
-    const offset = (windows.size % 6) * 28;
+    const offset = (windows.size % 6) * 26;
     const el = document.createElement('div');
     el.className = 'fos-window';
     el.style.left = `${48 + offset}px`;
-    el.style.top = `${36 + offset}px`;
+    el.style.top = `${24 + offset}px`;
     el.innerHTML = `
       <div class="fos-titlebar">
+        <span class="app-dot" style="background:${color(app)}"></span>
         <span class="title">${app.name}</span>
         <div class="ops">
-          <button type="button" data-act="min" title="最小化">─</button>
-          <button type="button" data-act="max" title="最大化">▢</button>
-          <button type="button" class="close" data-act="close" title="关闭">✕</button>
+          <button type="button" data-act="min" title="Minimize">─</button>
+          <button type="button" data-act="max" title="Maximize">▢</button>
+          <button type="button" class="close" data-act="close" title="Close">✕</button>
         </div>
       </div>
-      <iframe class="fos-frame" src="${appUrl(app)}" title="${app.name}"></iframe>
+      <iframe class="fos-frame" src="${appUrl(app)}" title="${app.name}" allow="clipboard-read; clipboard-write; microphone"></iframe>
     `;
     layer.appendChild(el);
     windows.set(app.id, { el, app });
@@ -169,9 +166,7 @@
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
     });
-
     el.addEventListener('mousedown', () => focusWin(id));
-
     el.querySelector('[data-act="min"]').onclick = () => {
       el.classList.add('minimized');
       el.classList.remove('active');
@@ -188,15 +183,90 @@
     };
   }
 
+  /** Match natural language / voice to an app and open it. */
+  function resolveApp(text) {
+    const q = (text || '').trim().toLowerCase();
+    if (!q) return null;
+    const cleaned = q
+      .replace(/^(请|帮我|给我|我想|我要|麻烦|打开|开启|启动|进入|open|launch|start|run|go\s+to)\s*/gi, '')
+      .replace(/\s*(应用|程序|软件|app|please)$/gi, '')
+      .trim() || q;
+
+    const score = (app) => {
+      const names = [
+        app.name, app.id, app.description,
+        ...(app.aliases || []),
+      ].filter(Boolean).map((s) => String(s).toLowerCase());
+      let best = 0;
+      for (const n of names) {
+        if (!n) continue;
+        if (cleaned === n || q === n) best = Math.max(best, 100);
+        else if (cleaned.includes(n) || n.includes(cleaned)) best = Math.max(best, 80);
+        else if (q.includes(n)) best = Math.max(best, 70);
+      }
+      return best;
+    };
+
+    let bestApp = null;
+    let bestScore = 0;
+    for (const app of apps) {
+      const s = score(app);
+      if (s > bestScore) {
+        bestScore = s;
+        bestApp = app;
+      }
+    }
+    return bestScore >= 70 ? bestApp : null;
+  }
+
+  function handleAiCommand(raw) {
+    const text = (raw || '').trim();
+    if (!text) return;
+    const app = resolveApp(text);
+    if (!app) {
+      toast('No matching app');
+      return;
+    }
+    closeStart();
+    openApp(app);
+    toast(`Opened ${app.name}`);
+    document.getElementById('aiCmdInput').value = '';
+  }
+
+  let viewMode = 'category'; // category | list
+  let startOpen = false;
+
+  function filteredApps(q) {
+    const s = (q || '').trim().toLowerCase();
+    if (!s) return apps;
+    return apps.filter((a) =>
+      [a.name, a.id, ...(a.aliases || [])].join(' ').toLowerCase().includes(s)
+    );
+  }
+
+  function groupByCategory(list) {
+    const order = ['finance', 'workflow', 'data', 'audit', 'ai', 'collab', 'system'];
+    const groups = {};
+    list.forEach((a) => {
+      const key = a.category || 'system';
+      (groups[key] ||= { key, label: a.category_label || key, apps: [] }).apps.push(a);
+    });
+    return order
+      .filter((k) => groups[k])
+      .map((k) => groups[k])
+      .concat(Object.values(groups).filter((g) => !order.includes(g.key)));
+  }
+
   function renderIcons() {
     const grid = document.getElementById('iconGrid');
     if (!apps.length) {
-      grid.innerHTML = `<div class="empty-hint">暂无桌面应用。请确认账号权限，或点击开始菜单刷新。</div>`;
+      grid.innerHTML = `<div class="empty-hint">No apps</div>`;
       return;
     }
-    grid.innerHTML = apps.map((app) => `
-      <button type="button" class="desk-icon" data-id="${app.id}">
-        <span class="glyph">${glyph(app)}</span>
+    const desk = apps.filter((a) => a.pinned).length ? apps.filter((a) => a.pinned) : apps.slice(0, 8);
+    grid.innerHTML = desk.map((app) => `
+      <button type="button" class="desk-icon" data-id="${app.id}" title="${app.name}">
+        <span class="glyph" style="background:${color(app)}">${glyph(app)}</span>
         <span class="label">${app.name}</span>
       </button>
     `).join('');
@@ -208,50 +278,221 @@
     });
   }
 
-  function renderStart() {
+  function openFromId(id) {
+    const app = apps.find((a) => a.id === id);
+    if (!app) return;
+    openApp(app);
+    closeStart();
+  }
+
+  function openFolder(catKey, label, items) {
+    const fly = document.getElementById('folderFlyout');
+    const menu = document.getElementById('startMenu');
+    document.getElementById('folderTitle').textContent = label;
+    document.getElementById('folderGrid').innerHTML = items.map((app) => `
+      <button type="button" class="start-pin" data-id="${app.id}" title="${app.name}">
+        <span class="glyph" style="background:${color(app)}">${glyph(app)}</span>
+        <span class="label">${app.name}</span>
+      </button>
+    `).join('');
+    document.getElementById('folderGrid').querySelectorAll('.start-pin').forEach((btn) => {
+      btn.onclick = () => openFromId(btn.dataset.id);
+    });
+    menu.classList.remove('is-open');
+    menu.setAttribute('aria-hidden', 'true');
+    fly.classList.add('is-open');
+    fly.setAttribute('aria-hidden', 'false');
+    document.getElementById('startSmoke').classList.add('is-on');
+  }
+
+  function closeFolder() {
+    const fly = document.getElementById('folderFlyout');
+    fly.classList.remove('is-open');
+    fly.setAttribute('aria-hidden', 'true');
+  }
+
+  function renderStart(q) {
     const list = document.getElementById('startList');
-    const groups = {};
-    apps.forEach((a) => {
-      const key = a.category_label || a.category || '应用';
-      (groups[key] ||= []).push(a);
+    const pinned = document.getElementById('startPinned');
+    const cats = document.getElementById('startCategories');
+    const visible = filteredApps(q);
+    const pins = (visible.filter((a) => a.pinned).length
+      ? visible.filter((a) => a.pinned)
+      : visible).slice(0, 12);
+
+    pinned.innerHTML = pins.map((app) => `
+      <button type="button" class="start-pin" data-id="${app.id}" title="${app.name}">
+        <span class="glyph" style="background:${color(app)}">${glyph(app)}</span>
+        <span class="label">${app.name}</span>
+      </button>
+    `).join('');
+    pinned.querySelectorAll('.start-pin').forEach((btn) => {
+      btn.onclick = () => openFromId(btn.dataset.id);
     });
-    list.innerHTML = Object.entries(groups).map(([cat, items]) => `
-      <div class="start-cat">${cat}</div>
-      ${items.map((app) => `
+
+    const searching = !!(q || '').trim();
+    const modeBtn = document.getElementById('btnViewMode');
+    if (searching || viewMode === 'list') {
+      cats.classList.add('is-hidden');
+      list.classList.remove('is-hidden');
+      if (modeBtn) modeBtn.textContent = 'View: List';
+      list.innerHTML = visible.map((app) => `
         <button type="button" class="start-item" data-id="${app.id}">
-          <span class="glyph">${glyph(app)}</span>
-          <span class="meta"><strong>${app.name}</strong><small>${app.description || ''}</small></span>
+          <span class="glyph" style="background:${color(app)}">${glyph(app)}</span>
+          <span class="meta"><strong>${app.name}</strong></span>
         </button>
-      `).join('')}
-    `).join('') || '<div class="start-cat">无可用应用</div>';
-    list.querySelectorAll('.start-item').forEach((btn) => {
-      btn.onclick = () => {
-        const app = apps.find((a) => a.id === btn.dataset.id);
-        if (app) {
-          openApp(app);
-          document.getElementById('startMenu').hidden = true;
-        }
-      };
-    });
+      `).join('') || '<div style="padding:12px;opacity:.5">No results</div>';
+      list.querySelectorAll('.start-item').forEach((btn) => {
+        btn.onclick = () => openFromId(btn.dataset.id);
+      });
+    } else {
+      list.classList.add('is-hidden');
+      cats.classList.remove('is-hidden');
+      if (modeBtn) modeBtn.textContent = 'View: Category';
+      const groups = groupByCategory(visible);
+      cats.innerHTML = groups.map((g) => {
+        const preview = g.apps.slice(0, 4);
+        while (preview.length < 4) preview.push(null);
+        return `
+          <button type="button" class="cat-folder" data-cat="${g.key}">
+            <div class="mini-grid">
+              ${preview.map((app) => app
+                ? `<span class="mini" style="background:${color(app)}">${glyph(app)}</span>`
+                : `<span class="mini empty"></span>`
+              ).join('')}
+            </div>
+            <span class="cat-name">${g.label}</span>
+            <span class="cat-count">${g.apps.length}</span>
+          </button>
+        `;
+      }).join('') || '<div style="padding:12px;opacity:.5">No apps</div>';
+      cats.querySelectorAll('.cat-folder').forEach((btn) => {
+        btn.onclick = () => {
+          const g = groups.find((x) => x.key === btn.dataset.cat);
+          if (g) openFolder(g.key, g.label, g.apps);
+        };
+      });
+    }
   }
 
   function render() {
     renderIcons();
-    renderStart();
+    renderStart(document.getElementById('startFilter')?.value || '');
   }
 
-  document.getElementById('btnStart').onclick = () => {
+  function openStart() {
+    startOpen = true;
+    closeFolder();
     const menu = document.getElementById('startMenu');
-    menu.hidden = !menu.hidden;
+    const smoke = document.getElementById('startSmoke');
+    const btn = document.getElementById('btnStart');
+    document.getElementById('startFilter').value = '';
+    viewMode = 'category';
+    renderStart('');
+    // force reflow so open transition always plays
+    menu.classList.remove('is-open');
+    void menu.offsetWidth;
+    menu.classList.add('is-open');
+    menu.setAttribute('aria-hidden', 'false');
+    smoke.classList.add('is-on');
+    btn.classList.add('active');
+    btn.setAttribute('aria-expanded', 'true');
+    setTimeout(() => document.getElementById('startFilter')?.focus(), 80);
+  }
+
+  function closeStart() {
+    startOpen = false;
+    const menu = document.getElementById('startMenu');
+    const smoke = document.getElementById('startSmoke');
+    const btn = document.getElementById('btnStart');
+    menu.classList.remove('is-open');
+    menu.setAttribute('aria-hidden', 'true');
+    smoke.classList.remove('is-on');
+    btn.classList.remove('active');
+    btn.setAttribute('aria-expanded', 'false');
+    closeFolder();
+  }
+
+  function toggleStart() {
+    if (startOpen || document.getElementById('folderFlyout').classList.contains('is-open')) {
+      closeStart();
+    } else {
+      openStart();
+    }
+  }
+
+  function setupVoice() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const mic = document.getElementById('btnVoice');
+    if (!SR) {
+      mic.onclick = () => toast('Voice not supported in this browser');
+      return;
+    }
+    recognition = new SR();
+    recognition.lang = 'zh-CN';
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => mic.classList.add('listening');
+    recognition.onend = () => mic.classList.remove('listening');
+    recognition.onerror = () => {
+      mic.classList.remove('listening');
+      toast('Voice failed');
+    };
+    recognition.onresult = (ev) => {
+      const text = ev.results[0][0].transcript;
+      document.getElementById('aiCmdInput').value = text;
+      handleAiCommand(text);
+    };
+    mic.onclick = () => {
+      try {
+        recognition.start();
+      } catch {
+        try { recognition.stop(); } catch { /* ignore */ }
+      }
+    };
+  }
+
+  document.getElementById('btnStart').onclick = (e) => {
+    e.stopPropagation();
+    toggleStart();
   };
+  document.getElementById('startSmoke').onclick = () => closeStart();
   document.getElementById('btnRefresh').onclick = () => fetchApps();
-  document.addEventListener('click', (e) => {
-    const menu = document.getElementById('startMenu');
-    if (menu.hidden) return;
-    if (e.target.closest('#startMenu') || e.target.closest('#btnStart')) return;
-    menu.hidden = true;
+  document.getElementById('startFilter').oninput = (e) => renderStart(e.target.value);
+  document.getElementById('btnViewMode').onclick = () => {
+    viewMode = viewMode === 'category' ? 'list' : 'category';
+    renderStart(document.getElementById('startFilter').value);
+  };
+  document.getElementById('btnAllApps').onclick = () => {
+    viewMode = 'list';
+    document.getElementById('startFilter').value = '';
+    renderStart('');
+  };
+  document.getElementById('folderBack').onclick = (e) => {
+    e.stopPropagation();
+    closeFolder();
+    openStart();
+  };
+
+  document.getElementById('aiCmdForm').onsubmit = (e) => {
+    e.preventDefault();
+    handleAiCommand(document.getElementById('aiCmdInput').value);
+  };
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') closeStart();
+    // Win key simulation: Ctrl+Esc toggles Start
+    if (e.ctrlKey && e.key === 'Escape') {
+      e.preventDefault();
+      toggleStart();
+    }
+    if (e.ctrlKey && e.code === 'Space') {
+      e.preventDefault();
+      document.getElementById('aiCmdInput')?.focus();
+    }
   });
 
+  setupVoice();
   tickClock();
   setInterval(tickClock, 1000);
   checkHealth();

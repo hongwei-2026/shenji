@@ -20,7 +20,7 @@ def test_login_page_is_financeos(client):
     assert resp.status_code == 200
     html = resp.get_data(as_text=True)
     assert 'FinanceOS' in html
-    assert '注册并进入桌面' in html or 'regBtn' in html
+    assert '注册并进入桌面' in html or 'regBtn' in html or 'Enter FinanceOS' in html
 
 
 def test_root_redirects_to_os(auth_client):
@@ -36,6 +36,49 @@ def test_os_desktop_page(auth_client):
     assert 'FinanceOS' in html
     assert 'icon-grid' in html
     assert 'financeos-desktop' in html
+    assert 'aiCmdForm' in html
+    assert 'startMenu' in html
+    assert 'startCategories' in html
+    assert 'startSmoke' in html
+    assert 'folderFlyout' in html
+    assert 'AI 财务助手' not in html
+    assert '系统搜索' not in html
+    assert '财务核算' not in html
+
+
+def test_browser_page(auth_client):
+    resp = auth_client.get('/browser')
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert 'Blink' in html and 'Gecko' in html
+
+
+def test_browser_home_api(auth_client):
+    resp = auth_client.get('/api/browser/home')
+    assert resp.status_code == 200
+    assert '双内核' in resp.get_data(as_text=True)
+
+
+def test_financeos_apps_include_core_and_browser(client):
+    reg = client.post(
+        '/api/auth/register',
+        json={
+            'username': 'fos_auditor_full',
+            'password': 'test1234',
+            'role': 'auditor',
+            'company': 'FOS Audit',
+        },
+    )
+    assert reg.get_json().get('success') is True, reg.get_json()
+    apps_resp = client.get('/api/financeos/apps')
+    data = apps_resp.get_json()
+    ids = {a['id'] for a in data['apps']}
+    assert 'browser' in ids
+    assert 'audit' in ids
+    assert 'ai-agent' in ids or 'search' in ids
+    assert 'upload' in ids
+    assert 'vouchers' not in ids
+
 
 
 def test_financeos_apps_filtered_by_role(client):
@@ -112,9 +155,11 @@ def test_list_apps_helper_rbac():
     auditor = {'id': 1, 'role': 'auditor', 'preferences': '{}', 'company': 'X'}
     ids = {a['id'] for a in list_apps_for_user(auditor)}
     assert 'audit' in ids
+    assert 'browser' in ids
     assert 'vouchers' not in ids
 
     accountant = {'id': 2, 'role': 'accountant', 'preferences': '{}', 'company': 'X'}
     ids2 = {a['id'] for a in list_apps_for_user(accountant)}
     assert 'vouchers' in ids2
     assert 'audit' not in ids2
+    assert 'browser' in ids2

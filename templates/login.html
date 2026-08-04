@@ -3,27 +3,27 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>登录 · FinanceOS</title>
+<title>Login · FinanceOS</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/financeos-login.css') }}?v={{ ui_build|default('13') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/financeos-login.css') }}?v={{ ui_build|default('14') }}">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 </head>
 <body class="fos-login-body">
   <div class="fos-login-shell">
     <aside class="fos-login-hero">
       <div class="fos-login-brand">
-        <span class="fos-mark">F</span>
+        <span class="fos-mark">AI</span>
         <div>
           <strong>FinanceOS</strong>
-          <small>财务操作系统 · Linux 桌面体验</small>
+          <small>AI Financial Operating System</small>
         </div>
       </div>
-      <h1>像操作系统一样用财务</h1>
-      <p>凭证、应收、应付、发票、审计、消息各自独立成应用。登录后进入可视化桌面。</p>
+      <h1>FinanceOS</h1>
+      <p>Tell AI to open apps. Clean desktop. Dual-kernel browser. Meilisearch.</p>
       <ul class="fos-points">
-        <li><i class="bi bi-grid-3x3-gap"></i> 桌面图标 + 开始菜单</li>
-        <li><i class="bi bi-window"></i> 一应用一窗口，不臃肿</li>
-        <li><i class="bi bi-shield-check"></i> 按职位显示可用软件</li>
+        <li><i class="bi bi-mic"></i> Voice / text to launch apps</li>
+        <li><i class="bi bi-robot"></i> Built-in AI Agent</li>
+        <li><i class="bi bi-globe2"></i> Blink + Gecko browser</li>
       </ul>
       <button type="button" class="fos-demo-btn" id="demoEnterBtn">
         <i class="bi bi-play-fill"></i> 演示入口 · 进入桌面
@@ -44,7 +44,7 @@
         <label>用户名<input id="loginUser" name="username" required minlength="2" placeholder="输入用户名"></label>
         <label>密码<input id="loginPass" name="password" type="password" required minlength="4" placeholder="输入密码"></label>
         <label class="fos-check"><input type="checkbox" id="rememberMe" checked> 记住登录（30天）</label>
-        <button type="submit" class="fos-primary" id="loginBtn">进入 FinanceOS</button>
+        <button type="submit" class="fos-primary" id="loginBtn">Enter FinanceOS</button>
       </form>
 
       <form id="registerForm" class="fos-form" style="display:none" autocomplete="off">

@@ -1,50 +1,82 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en" translate="no">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="google" content="notranslate">
 <title>FinanceOS</title>
 <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
-<link rel="stylesheet" href="{{ url_for('static', filename='css/financeos-desktop.css') }}?v={{ ui_build|default('13') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/financeos-desktop.css') }}?v={{ ui_build }}">
 </head>
-<body>
-  <div id="desktop" class="desktop">
-    <header class="desktop-brand">
-      <div class="brand-mark">F</div>
-      <div>
-        <strong>FinanceOS</strong>
-        <small>财务操作系统 · {{ g.current_user.username if g.current_user else '' }}{% if user_role_label %} · {{ user_role_label }}{% endif %}</small>
-      </div>
-    </header>
-
-    <div id="iconGrid" class="icon-grid" aria-label="桌面应用"></div>
+<body class="win11">
+  <div id="desktop" class="desktop" aria-label="FinanceOS">
+    <div class="wallpaper" aria-hidden="true"></div>
+    <div id="iconGrid" class="icon-grid" aria-label="Apps"></div>
     <div id="windowLayer" class="window-layer"></div>
 
-    <div id="startMenu" class="start-menu" hidden>
-      <div class="start-head">
-        <div>
-          <strong>开始</strong>
-          <div class="start-user">{{ g.current_user.username if g.current_user else '' }}{% if user_company %} · {{ user_company }}{% endif %}</div>
-        </div>
-        <a class="btn-text" href="/logout">退出</a>
+    <!-- Win11 light-dismiss smoke -->
+    <div id="startSmoke" class="start-smoke" aria-hidden="true"></div>
+
+    <div id="startMenu" class="start-menu" aria-hidden="true">
+      <div class="start-search-row">
+        <i class="bi bi-search"></i>
+        <input id="startFilter" type="search" placeholder="Search apps, settings, documents" autocomplete="off">
       </div>
-      <div id="startList" class="start-list"></div>
+
+      <div class="start-section-head">
+        <span>Pinned</span>
+        <button type="button" id="btnAllApps" class="linkish">All apps ›</button>
+      </div>
+      <div id="startPinned" class="start-pinned"></div>
+
+      <div class="start-section-head">
+        <span>Recommended</span>
+        <button type="button" id="btnViewMode" class="linkish">View: Category</button>
+      </div>
+      <div id="startCategories" class="start-categories"></div>
+      <div id="startList" class="start-list is-hidden"></div>
+
       <div class="start-foot">
-        <button type="button" id="btnRefresh">刷新应用</button>
-        <a class="btn-text" href="/home">经典界面</a>
+        <div class="start-user-card">
+          <span class="avatar">{{ (g.current_user.username[:1] if g.current_user else 'U')|upper }}</span>
+          <strong>{{ g.current_user.username if g.current_user else '' }}</strong>
+        </div>
+        <div class="start-foot-actions">
+          <button type="button" id="btnRefresh" title="Refresh">⟳</button>
+          <a href="/logout" title="Sign out">⏻</a>
+        </div>
       </div>
+    </div>
+
+    <div id="folderFlyout" class="folder-flyout" aria-hidden="true">
+      <div class="folder-flyout-head">
+        <button type="button" id="folderBack" class="linkish">‹ Back</button>
+        <strong id="folderTitle">Folder</strong>
+      </div>
+      <div id="folderGrid" class="folder-grid"></div>
     </div>
   </div>
 
   <footer class="taskbar">
-    <button type="button" id="btnStart" class="taskbar-start" title="开始">
-      <span class="start-logo">F</span>
-      <span>开始</span>
-    </button>
-    <div id="taskApps" class="taskbar-apps"></div>
+    <div class="taskbar-center">
+      <button type="button" id="btnStart" class="taskbar-start" title="Start" aria-label="Start" aria-expanded="false">
+        <svg class="win-logo" viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="currentColor" d="M3 3h8.5v8.5H3V3zm9.5 0H21v8.5h-8.5V3zM3 12.5H11.5V21H3v-8.5zm9.5 0H21V21h-8.5v-8.5z"/>
+        </svg>
+      </button>
+      <form id="aiCmdForm" class="ai-cmd" title="Ask FinanceOS">
+        <button type="button" id="btnVoice" class="ai-mic" title="Voice"><i class="bi bi-mic"></i></button>
+        <input id="aiCmdInput" type="text" placeholder="Ask FinanceOS… open vouchers" autocomplete="off">
+        <button type="submit" class="ai-go" title="Go">↵</button>
+      </form>
+      <div id="taskApps" class="taskbar-apps"></div>
+    </div>
     <div class="taskbar-tray">
-      <span id="svcDot" class="svc-dot" title="服务状态"></span>
-      <span id="clock"></span>
+      <span id="svcDot" class="svc-dot" title="Status"></span>
+      <button type="button" id="trayClock" class="tray-clock">
+        <span id="clock"></span>
+        <span id="clockDate" class="clock-date"></span>
+      </button>
     </div>
   </footer>
 
@@ -54,7 +86,8 @@
       'username': g.current_user.username if g.current_user else '',
       'role': g.current_user.role if g.current_user else '',
     }|tojson }};
+    window.__FOS_BRAND = {{ {'name': 'FinanceOS', 'short': 'FinanceOS'}|tojson }};
   </script>
-  <script src="{{ url_for('static', filename='js/financeos-desktop.js') }}?v={{ ui_build|default('13') }}"></script>
+  <script src="{{ url_for('static', filename='js/financeos-desktop.js') }}?v={{ ui_build }}"></script>
 </body>
 </html>

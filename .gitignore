@@ -27,3 +27,5 @@ static/downloads/*.hap
 coverage.xml
 htmlcov/
 .ruff_cache/
+bin/meilisearch
+data/meilisearch/

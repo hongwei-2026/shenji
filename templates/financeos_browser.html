@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI财务浏览器</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/financeos-browser.css') }}?v={{ ui_build|default('14') }}">
+</head>
+<body>
+  <div class="browser-shell">
+    <div class="tabs" id="tabs"></div>
+    <div class="toolbar">
+      <button type="button" id="btnBack" title="后退">←</button>
+      <button type="button" id="btnForward" title="前进">→</button>
+      <button type="button" id="btnReload" title="刷新">↻</button>
+      <button type="button" id="btnHome" title="主页">⌂</button>
+      <form id="navForm" class="addr">
+        <input id="addrInput" type="text" placeholder="输入网址或搜索内容" spellcheck="false" autocomplete="off">
+        <button type="submit">转到</button>
+      </form>
+      <div class="engine-switch" role="group" aria-label="内核切换">
+        <button type="button" data-engine="blink" class="eng active" title="Blink 内核（Chromium）">Blink</button>
+        <button type="button" data-engine="gecko" class="eng" title="Gecko 内核（Firefox UA 渲染）">Gecko</button>
+      </div>
+      <button type="button" id="btnNewTab" title="新建标签">＋</button>
+    </div>
+    <div class="status-line">
+      <span id="engineLabel">内核：Blink</span>
+      <span id="loadState">就绪</span>
+    </div>
+    <div class="viewport">
+      <iframe id="blinkView" class="view active" title="Blink" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"></iframe>
+      <iframe id="geckoView" class="view" title="Gecko" sandbox="allow-same-origin allow-forms allow-popups"></iframe>
+    </div>
+  </div>
+  <script src="{{ url_for('static', filename='js/financeos-browser.js') }}?v={{ ui_build|default('14') }}"></script>
+</body>
+</html>

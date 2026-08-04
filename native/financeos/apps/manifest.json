@@ -1,12 +1,28 @@
 {
-  "version": 1,
+  "version": 2,
+  "brand": "FinanceOS",
   "apps": [
+    {"id": "finance", "name": "财务总览", "path": "/finance", "feature": "finance", "icon": "pie-chart", "category": "finance"},
     {"id": "vouchers", "name": "凭证", "path": "/finance/vouchers", "feature": "vouchers", "icon": "journal-text", "category": "finance"},
     {"id": "receivables", "name": "应收", "path": "/finance/receivables", "feature": "receivables", "icon": "cash-coin", "category": "finance"},
     {"id": "payables", "name": "应付", "path": "/finance/payables", "feature": "payables", "icon": "credit-card", "category": "finance"},
     {"id": "invoices", "name": "发票", "path": "/finance/invoices", "feature": "invoices", "icon": "receipt", "category": "finance"},
-    {"id": "audit", "name": "审计", "path": "/dashboard", "feature": "dashboard", "icon": "clipboard2-check", "category": "audit"},
+    {"id": "reconciliation", "name": "银行对账", "path": "/finance/reconciliation", "feature": "reconciliation", "icon": "bank", "category": "finance"},
+    {"id": "travel", "name": "差旅报销", "path": "/finance/travel-expenses", "feature": "travel_expense_audit", "icon": "airplane", "category": "finance"},
+    {"id": "approvals", "name": "审批中心", "path": "/workflow/approvals", "feature": "approvals", "icon": "check2-square", "category": "workflow"},
+    {"id": "tasks", "name": "任务中心", "path": "/workflow/tasks", "feature": "tasks", "icon": "list-task", "category": "workflow"},
+    {"id": "upload", "name": "数据导入", "path": "/home", "feature": "upload", "icon": "cloud-upload", "category": "data"},
+    {"id": "edit", "name": "表格编辑", "path": "/edit", "feature": "edit", "icon": "table", "category": "data"},
+    {"id": "preview", "name": "数据预览", "path": "/preview", "feature": "preview", "icon": "eye", "category": "data"},
+    {"id": "audit", "name": "审计概览", "path": "/dashboard", "feature": "dashboard", "icon": "clipboard2-check", "category": "audit"},
+    {"id": "analysis", "name": "规则检测", "path": "/analysis", "feature": "analysis", "icon": "search", "category": "audit"},
+    {"id": "report", "name": "审计报告", "path": "/report", "feature": "report", "icon": "file-earmark-text", "category": "audit"},
+    {"id": "history", "name": "历史记录", "path": "/history", "feature": "history", "icon": "clock-history", "category": "audit"},
+    {"id": "ai-agent", "name": "AI Agent", "path": "/agent", "feature": "agent", "icon": "robot", "category": "ai"},
+    {"id": "models", "name": "模型管理", "path": "/models", "feature": "agent", "icon": "cpu", "category": "ai"},
     {"id": "chat", "name": "消息", "path": "/chat", "feature": "chat", "icon": "chat-left-text", "category": "collab"},
+    {"id": "browser", "name": "浏览器", "path": "/browser", "feature": null, "icon": "globe2", "category": "system", "kind": "browser"},
+    {"id": "search", "name": "搜索", "path": "/search?q=财务", "feature": "search", "icon": "search-heart", "category": "system"},
     {"id": "settings", "name": "设置", "path": "/profile", "feature": null, "icon": "gear", "category": "system"}
   ]
 }
