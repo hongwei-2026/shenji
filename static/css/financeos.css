@@ -1,0 +1,65 @@
+/* FinanceOS 极简应用窗口（无侧栏） */
+body.financeos-chrome {
+  --fos-bar-h: 40px;
+  --fos-bg: #f3f4f6;
+  --fos-ink: #111827;
+  --fos-muted: #6b7280;
+  --fos-line: #e5e7eb;
+  --fos-accent: #0f766e;
+  background: var(--fos-bg);
+}
+
+body.financeos-chrome .app-shell-os {
+  min-height: 100vh;
+}
+
+body.financeos-chrome .app-main-full {
+  margin: 0;
+  width: 100%;
+  max-width: none;
+}
+
+body.financeos-chrome .app-content-os {
+  padding: 16px 20px 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.financeos-app-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: -8px -4px 16px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--fos-line);
+  background: #fff;
+  border-radius: 8px;
+}
+
+.financeos-brand {
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--fos-accent);
+}
+
+.financeos-app-title {
+  flex: 1;
+  font-size: 14px;
+  color: var(--fos-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.financeos-user {
+  font-size: 12px;
+  color: var(--fos-muted);
+}
+
+body.financeos-chrome .page-header {
+  margin-bottom: 12px;
+}
+
+body.financeos-chrome .page-actions .btn {
+  border-radius: 6px;
+}

@@ -580,7 +580,8 @@ def auto_friend_same_company(user_id: int, company: str) -> int:
     count = 0
     with _connect() as conn:
         peers = conn.execute(
-            'SELECT id FROM users WHERE company=? AND id!=? AND TRIM(company) != ""',
+            '''SELECT id FROM users
+               WHERE TRIM(company)=? AND id!=? AND TRIM(company) != ""''',
             (company, user_id),
         ).fetchall()
         for p in peers:
@@ -615,10 +616,31 @@ def list_company_colleagues(user_id: int) -> list[dict]:
             return []
         rows = conn.execute(
             '''SELECT id, username, role, company FROM users
-               WHERE company=? AND id!=? ORDER BY username''',
+               WHERE TRIM(company)=? AND id!=? ORDER BY username''',
             (company, user_id),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def is_same_company(user_id: int, other_id: int) -> bool:
+    """判断两人是否同属一家公司（按 TRIM 后的公司名）。"""
+    if not user_id or not other_id or user_id == other_id:
+        return False
+    init_db()
+    with _connect() as conn:
+        rows = conn.execute(
+            'SELECT id, TRIM(company) AS company FROM users WHERE id IN (?, ?)',
+            (user_id, other_id),
+        ).fetchall()
+    by_id = {int(r['id']): (r['company'] or '').strip() for r in rows}
+    a = by_id.get(int(user_id), '')
+    b = by_id.get(int(other_id), '')
+    return bool(a) and a == b
+
+
+def can_invite_colleague(user_id: int, other_id: int) -> bool:
+    """好友或同公司同事均可邀请。"""
+    return is_friend(user_id, other_id) or is_same_company(user_id, other_id)
 
 def get_user_by_username(username: str) -> dict | None:
     init_db()
@@ -2217,7 +2239,7 @@ def join_meeting(meeting_id: int, user_id: int) -> dict | None:
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     with _connect() as conn:
         meeting = conn.execute(
-            'SELECT * FROM meeting_rooms WHERE id=?', (meeting_id,)
+            "SELECT * FROM meeting_rooms WHERE id=? AND status='active'", (meeting_id,)
         ).fetchone()
         if not meeting:
             return None
@@ -2239,6 +2261,20 @@ def join_meeting(meeting_id: int, user_id: int) -> dict | None:
         'meeting': dict(meeting),
         'participants': [dict(r) for r in participants],
     }
+
+
+def get_meeting_by_id(meeting_id: int, *, active_only: bool = True) -> dict | None:
+    init_db()
+    with _connect() as conn:
+        if active_only:
+            row = conn.execute(
+                "SELECT * FROM meeting_rooms WHERE id=? AND status='active'", (meeting_id,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                'SELECT * FROM meeting_rooms WHERE id=?', (meeting_id,),
+            ).fetchone()
+    return dict(row) if row else None
 
 
 def leave_meeting(meeting_id: int, user_id: int) -> None:

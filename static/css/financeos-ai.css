@@ -1,0 +1,37 @@
+:root { font-family: "Segoe UI Variable","Segoe UI","PingFang SC",sans-serif; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #0f172a; color: #e2e8f0; }
+.ai-shell { height: 100%; display: grid; grid-template-rows: auto 1fr auto auto; }
+.ai-head {
+  display: flex; gap: 12px; align-items: center;
+  padding: 14px 16px; border-bottom: 1px solid rgba(255,255,255,.08);
+  background: rgba(15,23,42,.9);
+}
+.ai-logo svg { width: 36px; height: 36px; display: block; }
+.ai-head strong { display: block; font-size: 15px; }
+.ai-head small { color: #94a3b8; font-size: 12px; }
+.ai-msgs { overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.bubble {
+  max-width: 85%; padding: 10px 12px; border-radius: 12px; font-size: 14px; line-height: 1.45;
+  white-space: pre-wrap;
+}
+.bubble.bot { background: rgba(99,102,241,.2); border: 1px solid rgba(99,102,241,.35); align-self: flex-start; }
+.bubble.user { background: rgba(0,120,212,.35); align-self: flex-end; }
+.ai-suggest { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+.ai-suggest button {
+  border: 1px solid rgba(255,255,255,.12); background: rgba(255,255,255,.06);
+  color: #fff; border-radius: 999px; padding: 6px 10px; font-size: 12px; cursor: pointer;
+}
+.ai-suggest button:hover { background: rgba(255,255,255,.12); }
+.ai-form {
+  display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid rgba(255,255,255,.08);
+  background: #111827;
+}
+.ai-form input {
+  flex: 1; border: 1px solid #334155; background: #0b1220; color: #fff;
+  border-radius: 10px; padding: 10px 12px; outline: none;
+}
+.ai-form button {
+  border: 0; border-radius: 10px; padding: 0 14px; background: #6366f1; color: #fff; cursor: pointer;
+}
+#aiMic { background: #1e293b; }

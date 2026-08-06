@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# FinanceOS 应用启动器：financeos-open <app-id>
+set -euo pipefail
+
+APP_ID="${1:-}"
+API_BASE="${FINANCEOS_URL:-http://127.0.0.1:5000}"
+API_BASE="${API_BASE%/}"
+
+declare -A PATHS=(
+  [vouchers]="/finance/vouchers"
+  [receivables]="/finance/receivables"
+  [payables]="/finance/payables"
+  [invoices]="/finance/invoices"
+  [audit]="/dashboard"
+  [chat]="/chat"
+  [settings]="/profile"
+)
+
+if [[ -z "$APP_ID" || "$APP_ID" == "desktop" ]]; then
+  SHELL_DIR="${FINANCEOS_SHELL:-$HOME/.local/share/financeos/desktop-shell}"
+  if [[ -f "$SHELL_DIR/main.js" ]]; then
+    cd "$SHELL_DIR"
+    if command -v electron >/dev/null 2>&1; then
+      exec electron .
+    fi
+    if [[ -x "$SHELL_DIR/node_modules/.bin/electron" ]]; then
+      exec "$SHELL_DIR/node_modules/.bin/electron" .
+    fi
+  fi
+  echo "FinanceOS 桌面壳未安装，请先运行 install-financeos.sh" >&2
+  exit 1
+fi
+
+REL="${PATHS[$APP_ID]:-}"
+if [[ -z "$REL" ]]; then
+  echo "未知应用: $APP_ID" >&2
+  exit 1
+fi
+
+URL="${API_BASE}${REL}?chrome=os"
+SHELL_DIR="${FINANCEOS_SHELL:-$HOME/.local/share/financeos/desktop-shell}"
+
+if [[ -f "$SHELL_DIR/main.js" ]]; then
+  cd "$SHELL_DIR"
+  if command -v electron >/dev/null 2>&1; then
+    exec electron . --app="$APP_ID" --url="$URL"
+  fi
+  if [[ -x "$SHELL_DIR/node_modules/.bin/electron" ]]; then
+    exec "$SHELL_DIR/node_modules/.bin/electron" . -- "--app=$APP_ID"
+  fi
+fi
+
+if command -v chromium-browser >/dev/null 2>&1; then
+  exec chromium-browser --app="$URL"
+fi
+if command -v google-chrome >/dev/null 2>&1; then
+  exec google-chrome --app="$URL"
+fi
+if command -v xdg-open >/dev/null 2>&1; then
+  exec xdg-open "$URL"
+fi
+
+echo "无法打开应用窗口，请安装 Electron 或 Chromium" >&2
+exit 1

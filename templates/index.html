@@ -131,10 +131,20 @@
           <div class="action-icon"><i class="bi bi-speedometer2"></i></div>
           <h4>直接审计</h4>
           <p>数据无需修改，直接进入仪表盘、审计分析和报告</p>
+          {% set uf = user_features|default({}) %}
           <div class="d-flex gap-2 flex-wrap">
+            {% if uf.get('dashboard') %}
             <a href="/dashboard" class="btn btn-primary"><i class="bi bi-speedometer2"></i> 仪表盘</a>
+            {% endif %}
+            {% if uf.get('preview') %}
             <a href="/preview" class="btn btn-outline-primary"><i class="bi bi-table"></i> 预览</a>
+            {% endif %}
+            {% if uf.get('analysis') %}
             <a href="/analysis" class="btn btn-success"><i class="bi bi-search"></i> 分析</a>
+            {% endif %}
+            {% if not uf.get('dashboard') and not uf.get('analysis') and not uf.get('preview') %}
+            <span class="text-muted small">当前职位无审计相关功能</span>
+            {% endif %}
           </div>
         </div>
       </div>
@@ -378,7 +388,8 @@ function loadHistoryRecord(id, triggerEl) {
     .then(data => {
       if (data.success) {
         if (typeof showToast === 'function') showToast('历史记录已加载', 'success');
-        window.location.href = '/dashboard';
+        const uf = {{ (user_features|default({}))|tojson }};
+        window.location.href = uf.dashboard ? '/dashboard' : (uf.analysis ? '/analysis' : (uf.preview ? '/preview' : '/'));
       } else {
         if (triggerEl) { triggerEl.style.pointerEvents = ''; triggerEl.style.opacity = ''; }
         showError(data.error || '加载失败');

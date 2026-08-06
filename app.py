@@ -118,7 +118,7 @@ def _add_cache_headers(response):
 _analysis_cache = {}
 
 # 前端资源版本：每次发版递增，避免老账号浏览器缓存旧 UI
-UI_BUILD = '20260729b'
+UI_BUILD = '20260806dash'
 
 # 站点信任信息（可用环境变量覆盖，便于正式部署）
 SITE_INFO = {
@@ -187,14 +187,16 @@ _PUBLIC_PATHS = {
     '/favicon.ico', '/manifest.webmanifest', '/sw.js',
     '/downloads', '/api/downloads', '/api/downloads/harmony-guide',
     '/privacy', '/terms', '/about',
+    '/api/financeos/health',
 }
 
 
 @app.context_processor
 def inject_user_ui():
     user = g.get('current_user')
+    os_chrome = bool(g.get('os_chrome'))
     if not user:
-        return {}
+        return {'os_chrome': os_chrome}
     from modules.roles import (
         get_user_features, get_role_label, parse_preferences,
         get_user_company, is_company_admin,
@@ -208,6 +210,7 @@ def inject_user_ui():
         'user_accent': prefs.get('accent_color'),
         'user_company': get_user_company(user),
         'is_company_admin': is_company_admin(user),
+        'os_chrome': os_chrome,
     }
 
 
@@ -302,7 +305,7 @@ _FEATURE_PATH_RULES: list[tuple[str, str]] = [
     ('/api/workflow/approvals', 'approvals'),
     ('/workflow/tasks', 'tasks'),
     ('/api/workflow/tasks', 'tasks'),
-    ('/dashboard', 'dashboard'),
+    # /dashboard、/edit 为桌面核心应用，登录即可访问（不按角色隐藏）
     ('/analysis', 'analysis'),
     ('/report', 'report'),
     ('/agent', 'agent'),
@@ -342,6 +345,15 @@ def _load_current_user():
         if restore_user_from_remember(token):
             g.current_user = get_current_user()
 
+    # FinanceOS 极简窗口：?chrome=os 或 Cookie
+    chrome_q = (request.args.get('chrome') or '').strip().lower()
+    g.os_chrome = chrome_q == 'os' or request.cookies.get('financeos_chrome') == '1'
+    if chrome_q == 'os':
+        g.set_os_chrome_cookie = True
+    elif chrome_q in ('web', 'full', '0', 'off'):
+        g.os_chrome = False
+        g.clear_os_chrome_cookie = True
+
     path = request.path
     if path.startswith('/static') or path in _PUBLIC_PATHS:
         return
@@ -358,6 +370,15 @@ def _load_current_user():
         if path.startswith('/api/'):
             return jsonify({'success': False, 'error': f'无权限访问：{label}'}), 403
         return redirect(url_for('index'))
+
+
+@app.after_request
+def _financeos_chrome_cookie(resp):
+    if getattr(g, 'set_os_chrome_cookie', False):
+        resp.set_cookie('financeos_chrome', '1', max_age=86400 * 30, samesite='Lax')
+    if getattr(g, 'clear_os_chrome_cookie', False):
+        resp.delete_cookie('financeos_chrome')
+    return resp
 
 
 # ============================================================
@@ -400,11 +421,11 @@ def service_worker():
 @app.route('/login')
 def login_page():
     if g.current_user:
-        return redirect(request.args.get('next') or url_for('index'))
+        return redirect(request.args.get('next') or url_for('financeos_desktop_page'))
     from modules.roles import ROLES, THEMES, PAGE_STYLES, ALL_FEATURES, CUSTOMIZABLE_ROLES, PROFESSIONAL_ROLES, ROLE_HINTS, ROLE_DEFAULTS
     return render_template(
         'login.html',
-        next_url=request.args.get('next', '/'),
+        next_url=request.args.get('next', '/os'),
         roles=ROLES,
         themes=THEMES,
         page_styles=PAGE_STYLES,
@@ -454,7 +475,7 @@ def api_auth_login():
         return jsonify({'success': False, 'error': msg})
     remember = data.get('remember', True)
     token = login_user(user, remember=remember)
-    resp = jsonify({'success': True, 'redirect': data.get('next') or request.args.get('next') or '/'})
+    resp = jsonify({'success': True, 'redirect': data.get('next') or request.args.get('next') or '/os'})
     if token:
         resp.set_cookie(
             REMEMBER_COOKIE, token, max_age=REMEMBER_DAYS * 86400,
@@ -498,7 +519,7 @@ def api_auth_demo():
     token = login_user(user, remember=True)
     resp = jsonify({
         'success': True,
-        'redirect': '/finance',
+        'redirect': '/os',
         'message': '已进入演示环境，请勿录入真实敏感数据',
     })
     if token:
@@ -545,7 +566,7 @@ def api_auth_register():
     user = get_user_by_id(user_id)
     remember = data.get('remember', True)
     token = login_user(user, remember=remember)
-    resp = jsonify({'success': True, 'redirect': '/'})
+    resp = jsonify({'success': True, 'redirect': data.get('next') or '/os'})
     if token:
         resp.set_cookie(
             REMEMBER_COOKIE, token, max_age=REMEMBER_DAYS * 86400,
@@ -575,6 +596,13 @@ def logout_page():
 
 @app.route('/')
 def index():
+    # 默认进入 FinanceOS 可视化桌面；需要经典侧栏时访问 /home
+    return redirect(url_for('financeos_desktop_page'))
+
+
+@app.route('/home')
+def classic_home():
+    """经典 Web 侧栏首页（兼容旧入口）。"""
     return render_template('index.html')
 
 
@@ -588,8 +616,7 @@ def edit_page():
     if uid:
         # 强制从 SQLite 覆盖内存，保证协同写回后普通编辑看到最新数据
         restore_working_tables_for_user(uid, force=True)
-    if get_active_table() is None:
-        return redirect(url_for('index'))
+    # 无数据时仍打开编辑器（桌面快捷方式），不再踢回首页
     return render_template('edit.html', collab_token=None, ui_build=UI_BUILD)
 
 
@@ -640,22 +667,26 @@ def tasks_page():
 
 @app.route('/dashboard')
 def dashboard_page():
-    if get_active_table() is None:
-        return redirect(url_for('index'))
+    """审计仪表盘。无数据时仍打开页面（显示空态引导），避免在 OS 窗口内重定向回桌面。"""
+    uid = _uid()
+    if uid:
+        restore_working_tables_for_user(uid, force=False)
     return render_template('dashboard.html')
 
 
 @app.route('/preview')
 def preview_page():
-    if get_active_table() is None:
-        return redirect(url_for('index'))
+    uid = _uid()
+    if uid:
+        restore_working_tables_for_user(uid, force=False)
     return render_template('preview.html')
 
 
 @app.route('/analysis')
 def analysis_page():
-    if get_active_table() is None:
-        return redirect(url_for('index'))
+    uid = _uid()
+    if uid:
+        restore_working_tables_for_user(uid, force=False)
     return render_template('analysis.html')
 
 
@@ -676,6 +707,224 @@ def history_page():
 @app.route('/profile')
 def profile_page():
     return render_template('profile.html')
+
+
+@app.route('/api/financeos/apps')
+def api_financeos_apps():
+    """FinanceOS 桌面应用清单（按当前用户权限过滤）。"""
+    from modules.financeos import CATEGORY_LABELS, app_url, list_apps_for_user
+    user = g.get('current_user')
+    apps = list_apps_for_user(user)
+    payload = []
+    for a in apps:
+        item = {
+            'id': a['id'],
+            'name': a['name'],
+            'description': a.get('description', ''),
+            'icon': a.get('icon', 'app'),
+            'glyph': a.get('glyph') or (a.get('name') or '?')[:1],
+            'color': a.get('color', '#0078d4'),
+            'pinned': bool(a.get('pinned')),
+            'kind': a.get('kind') or 'app',
+            'aliases': a.get('aliases') or [],
+            'category': a.get('category', 'system'),
+            'category_label': CATEGORY_LABELS.get(a.get('category', ''), a.get('category', '')),
+            'path': a.get('path'),
+            'url': app_url(a),
+            'feature': a.get('feature'),
+        }
+        payload.append(item)
+    return jsonify({
+        'success': True,
+        'brand': 'FinanceOS',
+        'apps': payload,
+        'user': {
+            'id': user.get('id') if user else None,
+            'username': user.get('username') if user else None,
+            'role': user.get('role') if user else None,
+        },
+    })
+
+
+@app.route('/api/financeos/health')
+def api_financeos_health():
+    search_engine = 'SQLite FTS5'
+    try:
+        from modules import meilisearch_engine as meili
+        st = meili.status()
+        if st.get('meilisearch'):
+            search_engine = 'Meilisearch'
+        elif meili.ensure_server():
+            search_engine = 'Meilisearch'
+            try:
+                meili.sync_index(user_id=_uid() if g.get('current_user') else None)
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return jsonify({
+        'success': True,
+        'service': 'financeosd',
+        'os_chrome': bool(g.get('os_chrome')),
+        'brand': 'FinanceOS',
+        'search_engine': search_engine,
+        'browser_engines': ['blink', 'gecko'],
+    })
+
+
+@app.route('/os')
+def financeos_desktop_page():
+    """FinanceOS desktop (Win11-style)."""
+    return render_template('financeos_desktop.html')
+
+
+@app.route('/browser')
+def financeos_browser_page():
+    """双内核浏览器：Blink + Gecko。"""
+    return render_template('financeos_browser.html')
+
+
+@app.route('/os-ai')
+def financeos_ai_page():
+    """FinanceOS 桌面默认 AI 对话应用。"""
+    return render_template('financeos_ai.html')
+
+
+@app.route('/files')
+def financeos_files_page():
+    return render_template('financeos_files.html')
+
+
+@app.route('/terminal')
+def financeos_terminal_page():
+    return render_template('financeos_terminal.html')
+
+
+@app.route('/api/fos/files')
+def api_fos_files_list():
+    from modules import fos_filespace as fos
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    return jsonify(fos.list_dir(uid, request.args.get('path') or ''))
+
+
+@app.route('/api/fos/files/read')
+def api_fos_files_read():
+    from modules import fos_filespace as fos
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    return jsonify(fos.read_file(uid, request.args.get('path') or ''))
+
+
+@app.route('/api/fos/files/write', methods=['POST'])
+def api_fos_files_write():
+    from modules import fos_filespace as fos
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    data = request.get_json(silent=True) or {}
+    return jsonify(fos.write_file(uid, data.get('path') or '', data.get('content') or ''))
+
+
+@app.route('/api/fos/files/mkdir', methods=['POST'])
+def api_fos_files_mkdir():
+    from modules import fos_filespace as fos
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    data = request.get_json(silent=True) or {}
+    return jsonify(fos.mkdir(uid, data.get('path') or ''))
+
+
+@app.route('/api/fos/files/delete', methods=['POST'])
+def api_fos_files_delete():
+    from modules import fos_filespace as fos
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    data = request.get_json(silent=True) or {}
+    return jsonify(fos.delete_path(uid, data.get('path') or ''))
+
+
+@app.route('/api/fos/shortcuts', methods=['GET', 'POST'])
+def api_fos_shortcuts():
+    from modules import fos_filespace as fos
+    from modules.financeos import list_apps_for_user
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    if request.method == 'GET':
+        apps = list_apps_for_user(g.get('current_user'))
+        items = fos.ensure_default_shortcuts(uid, apps)
+        return jsonify({'success': True, 'items': items})
+    data = request.get_json(silent=True) or {}
+    return jsonify(fos.save_shortcuts(uid, data.get('items') or []))
+
+
+@app.route('/api/fos/terminal', methods=['POST'])
+def api_fos_terminal():
+    from modules.fos_terminal import run_command
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    data = request.get_json(silent=True) or {}
+    return jsonify(run_command(uid, data.get('cmd') or '', data.get('cwd') or ''))
+
+
+@app.route('/api/fos/assist')
+def api_fos_assist():
+    from modules.fos_assist import suggest_for
+    app_id = (request.args.get('app_id') or '').strip()
+    return jsonify({'success': True, 'app_id': app_id, 'suggestions': suggest_for(app_id)})
+
+
+@app.route('/api/browser/home')
+def api_browser_home():
+    from modules.browser_engine import HOME_HTML
+    return HOME_HTML, 200, {'Content-Type': 'text/html; charset=utf-8'}
+
+
+@app.route('/api/browser/gecko')
+def api_browser_gecko():
+    """Gecko 内核：Firefox UA 抓取并净化渲染。"""
+    from modules.browser_engine import fetch_gecko, normalize_url
+    raw = request.args.get('url') or ''
+    url = normalize_url(raw)
+    if url.startswith('about:'):
+        from modules.browser_engine import HOME_HTML
+        return jsonify({'success': True, 'engine': 'gecko', 'url': url, 'title': '主页', 'html': HOME_HTML})
+    if url.startswith('/'):
+        # 站内页（含搜索）由前端 iframe 直接加载；此处返回指引避免误当外链抓取
+        return jsonify({
+            'success': True,
+            'engine': 'gecko',
+            'url': url,
+            'title': '站内',
+            'internal': True,
+            'html': '',
+        })
+    return jsonify(fetch_gecko(url))
+
+
+@app.route('/api/search/engine')
+def api_search_engine_status():
+    try:
+        from modules import meilisearch_engine as meili
+        return jsonify({'success': True, **meili.status()})
+    except Exception as e:
+        return jsonify({'success': False, 'engine': 'SQLite FTS5', 'error': str(e)})
+
+
+@app.route('/api/search/reindex', methods=['POST'])
+def api_search_reindex():
+    try:
+        from modules import meilisearch_engine as meili
+        result = meili.sync_index(user_id=_uid())
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 
 
 @app.route('/downloads')
@@ -753,17 +1002,23 @@ def agent_develop_page():
 
 @app.route('/search')
 def search_page():
-    """站内搜索：开源 SQLite FTS5 全文检索（无第三方搜索 API）。"""
+    """站内搜索：优先 Meilisearch，回退 SQLite FTS5。"""
     from modules.search_engine import search
 
     query = (request.args.get('q') or '').strip()
     if not query:
-        return redirect(url_for('index'))
+        query = '财务'
 
     from modules.search_engine import refresh_dynamic_index
     try:
         refresh_dynamic_index(user_id=_uid())
     except Exception:  # noqa: S110 - 搜索索引刷新失败不阻断搜索
+        pass
+    try:
+        from modules import meilisearch_engine as meili
+        if meili.ensure_server():
+            meili.sync_index(user_id=_uid())
+    except Exception:
         pass
 
     data = search(query, user_id=_uid())
@@ -773,7 +1028,7 @@ def search_page():
         results=data.get('results') or [],
         search_ok=data.get('success', False),
         search_error=data.get('error'),
-        search_engine=data.get('engine', 'SQLite FTS5'),
+        search_engine=data.get('engine', 'Meilisearch'),
         search_note=data.get('engine_note', ''),
     )
 
@@ -1571,24 +1826,24 @@ def api_collab_delete_column(token, col_name):
 
 @app.route('/api/collab/<token>/invite', methods=['POST'])
 def api_collab_invite(token):
-    """邀请好友协同编辑，并发送消息链接"""
+    """邀请好友或同公司同事协同编辑，并发送消息链接"""
     from modules.collab import build_invite_message, can_access_collab
     from modules.database import (
-        create_notification, get_collab_session, get_user_by_id,
-        is_friend, join_collab_session, send_message,
+        can_invite_colleague, create_notification, get_collab_session, get_user_by_id,
+        join_collab_session, send_message,
     )
     data = request.get_json(silent=True) or {}
-    friend_id = data.get('friend_id')
+    friend_id = data.get('friend_id') or data.get('user_id')
     if not friend_id:
-        return jsonify({'success': False, 'error': '请选择好友'})
+        return jsonify({'success': False, 'error': '请选择要邀请的同事'})
     friend_id = int(friend_id)
     session = get_collab_session(token)
     if not session:
         return jsonify({'success': False, 'error': '协同会话不存在'})
     if not can_access_collab(session, _uid()):
         return jsonify({'success': False, 'error': '无权邀请'})
-    if not is_friend(_uid(), friend_id):
-        return jsonify({'success': False, 'error': '只能邀请好友'})
+    if not can_invite_colleague(_uid(), friend_id):
+        return jsonify({'success': False, 'error': '只能邀请好友或同公司同事'})
     join_collab_session(session['id'], friend_id)
     me = get_user_by_id(_uid())
     friend = get_user_by_id(friend_id)
@@ -2736,12 +2991,98 @@ def api_groups_poll():
 
 @app.route('/api/meeting/create', methods=['POST'])
 def api_meeting_create():
-    """创建多人会议"""
-    from modules.database import create_meeting
+    """创建多人会议，可选邀请同公司同事/好友"""
+    from modules.database import (
+        can_invite_colleague, create_meeting, create_notification,
+        get_user_by_id, send_message,
+    )
     data = request.get_json(silent=True) or {}
     title = (data.get('title') or '').strip() or '多人会议'
     meeting = create_meeting(title, _uid())
-    return jsonify({'success': True, 'meeting': meeting})
+    invitee_ids = data.get('invitee_ids') or data.get('colleague_ids') or []
+    invited = []
+    me = get_user_by_id(_uid())
+    me_name = (me or {}).get('username') or '同事'
+    for raw_id in invitee_ids:
+        try:
+            invitee_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if invitee_id == _uid() or not can_invite_colleague(_uid(), invitee_id):
+            continue
+        peer = get_user_by_id(invitee_id)
+        if not peer:
+            continue
+        content = (
+            f'{me_name} 邀请你加入会议「{meeting["title"]}」\n'
+            f'会议码：{meeting["room_code"]}\n'
+            f'点击通知或到消息页使用会议码加入。'
+        )
+        send_message(_uid(), invitee_id, content)
+        create_notification(
+            invitee_id,
+            'meeting',
+            f'{me_name} 邀请你加入会议',
+            f'{meeting["title"]} · 会议码 {meeting["room_code"]}',
+            f'/chat?join_meeting={meeting["room_code"]}',
+        )
+        invited.append({'id': invitee_id, 'username': peer['username']})
+    return jsonify({'success': True, 'meeting': meeting, 'invited': invited})
+
+
+@app.route('/api/meeting/<int:meeting_id>/invite', methods=['POST'])
+def api_meeting_invite(meeting_id):
+    """会议中邀请同公司同事或好友"""
+    from modules.database import (
+        can_invite_colleague, create_notification, get_meeting_by_id,
+        get_meeting_participants, get_user_by_id, send_message,
+    )
+    data = request.get_json(silent=True) or {}
+    invitee_ids = list(data.get('invitee_ids') or [])
+    raw_one = data.get('user_id') or data.get('friend_id')
+    if raw_one:
+        invitee_ids.append(raw_one)
+    if not invitee_ids:
+        return jsonify({'success': False, 'error': '请选择要邀请的同事'})
+
+    participants = get_meeting_participants(meeting_id)
+    if not any(int(p['user_id']) == _uid() for p in participants):
+        return jsonify({'success': False, 'error': '仅参会人员可邀请'})
+
+    meeting = get_meeting_by_id(meeting_id, active_only=True)
+    if not meeting:
+        return jsonify({'success': False, 'error': '会议不存在或已结束'})
+
+    me = get_user_by_id(_uid())
+    me_name = (me or {}).get('username') or '同事'
+    invited = []
+    for raw_id in invitee_ids:
+        try:
+            invitee_id = int(raw_id)
+        except (TypeError, ValueError):
+            continue
+        if invitee_id == _uid() or not can_invite_colleague(_uid(), invitee_id):
+            continue
+        peer = get_user_by_id(invitee_id)
+        if not peer:
+            continue
+        content = (
+            f'{me_name} 邀请你加入会议「{meeting["title"]}」\n'
+            f'会议码：{meeting["room_code"]}\n'
+            f'点击通知或到消息页使用会议码加入。'
+        )
+        send_message(_uid(), invitee_id, content)
+        create_notification(
+            invitee_id,
+            'meeting',
+            f'{me_name} 邀请你加入会议',
+            f'{meeting["title"]} · 会议码 {meeting["room_code"]}',
+            f'/chat?join_meeting={meeting["room_code"]}',
+        )
+        invited.append({'id': invitee_id, 'username': peer['username']})
+    if not invited:
+        return jsonify({'success': False, 'error': '未能邀请：请确认对方为好友或同公司同事'})
+    return jsonify({'success': True, 'invited': invited, 'room_code': meeting['room_code']})
 
 
 @app.route('/api/meeting/<int:meeting_id>/join', methods=['POST'])

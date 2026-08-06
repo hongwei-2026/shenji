@@ -237,29 +237,23 @@ def _json_dumps(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False)
 
 
-def seed_partners(user_id: int) -> None:
+def purge_demo_partners(user_id: int) -> None:
+    """清理历史演示往来单位（假数据），不影响用户自行录入的真实客户/供应商。"""
     ensure_enterprise_schema()
-    now = _now()
-    seeds = [
-        ('customer', 'C001', '华东科技有限公司', '张经理', '13800001001'),
-        ('customer', 'C002', '星海贸易集团', '李总', '13800001002'),
-        ('vendor', 'V001', '办公用品供应商', '王会计', '13800002001'),
-        ('vendor', 'V002', '云服务科技', '赵工', '13800002002'),
-    ]
     with _connect() as conn:
-        for ptype, code, name, contact, phone in seeds:
-            conn.execute(
-                '''INSERT OR IGNORE INTO fin_partners
-                   (user_id, partner_type, code, name, contact, phone, balance, created_at)
-                   VALUES (?, ?, ?, ?, ?, ?, 0, ?)''',
-                (user_id, ptype, code, name, contact, phone, now),
-            )
+        conn.execute(
+            '''DELETE FROM fin_partners
+               WHERE user_id=? AND code IN ('C001','C002','V001','V002')
+                 AND phone IN ('13800001001','13800001002','13800002001','13800002002')
+                 AND name IN ('华东科技有限公司','星海贸易集团','办公用品供应商','云服务科技')''',
+            (user_id,),
+        )
         conn.commit()
 
 
 def list_partners(user_id: int, partner_type: str | None = None) -> list[dict]:
     ensure_enterprise_schema()
-    seed_partners(user_id)
+    purge_demo_partners(user_id)
     with _connect() as conn:
         if partner_type:
             rows = conn.execute(
@@ -372,29 +366,21 @@ def record_invoice_payment(user_id: int, invoice_id: int, amount: float) -> None
         conn.commit()
 
 
-def seed_bank_accounts(user_id: int) -> None:
+def purge_demo_bank_accounts(user_id: int) -> None:
+    """清理历史演示银行账户（假卡号），不自动造数。"""
     ensure_enterprise_schema()
-    from modules.database import ensure_finance_seed
-    ensure_finance_seed(user_id)
-    now = _now()
     with _connect() as conn:
-        if conn.execute('SELECT 1 FROM fin_bank_accounts WHERE user_id=? LIMIT 1', (user_id,)).fetchone():
-            return
-        acct = conn.execute(
-            'SELECT balance FROM fin_accounts WHERE user_id=? AND code=?', (user_id, '1002'),
-        ).fetchone()
-        bal = float(acct['balance']) if acct else 0
         conn.execute(
-            '''INSERT INTO fin_bank_accounts (user_id, account_code, bank_name, account_no, book_balance, created_at)
-               VALUES (?, '1002', '中国工商银行', '6222****8888', ?, ?)''',
-            (user_id, bal, now),
+            '''DELETE FROM fin_bank_accounts
+               WHERE user_id=? AND account_no=? AND bank_name=?''',
+            (user_id, '6222****8888', '中国工商银行'),
         )
         conn.commit()
 
 
 def list_bank_accounts(user_id: int) -> list[dict]:
     ensure_enterprise_schema()
-    seed_bank_accounts(user_id)
+    purge_demo_bank_accounts(user_id)
     with _connect() as conn:
         rows = conn.execute('SELECT * FROM fin_bank_accounts WHERE user_id=?', (user_id,)).fetchall()
     return [dict(r) for r in rows]

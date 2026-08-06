@@ -16,6 +16,7 @@
 <link href="{{ url_for('static', filename='vendor/datatables/css/dataTables.bootstrap5.min.css') }}" rel="stylesheet">
 <link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ ui_build|default('13') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/financeos.css') }}?v={{ ui_build|default('13') }}">
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta name="ui-build" content="{{ ui_build|default('13') }}">
@@ -24,9 +25,9 @@
 {% endif %}
 {% block extra_head %}{% endblock %}
 </head>
-<body class="app-body page-style-{{ user_page_style|default('classic') }}" data-theme="{{ user_theme|default('default') }}">
-<div class="app-shell">
-  {% if g.current_user and request.path not in ('/login',) %}
+<body class="app-body page-style-{{ user_page_style|default('classic') }}{% if os_chrome %} financeos-chrome{% endif %}" data-theme="{{ user_theme|default('default') }}"{% if os_chrome %} data-financeos="1"{% endif %}>
+<div class="app-shell{% if os_chrome %} app-shell-os{% endif %}">
+  {% if g.current_user and request.path not in ('/login',) and not os_chrome %}
   <aside class="app-sidebar" id="appSidebar">
     <div class="sidebar-brand">
       <span class="brand-mark brand-logo" title="智能财务" aria-label="Logo">
@@ -115,8 +116,8 @@
   </aside>
   {% endif %}
 
-  <div class="app-main{% if not g.current_user or request.path == '/login' %} app-main-full{% endif %}">
-    {% if g.current_user and request.path not in ('/login',) %}
+  <div class="app-main{% if not g.current_user or request.path == '/login' or os_chrome %} app-main-full{% endif %}">
+    {% if g.current_user and request.path not in ('/login',) and not os_chrome %}
     <header class="app-topbar">
       <button class="btn btn-ghost d-lg-none" type="button" id="sidebarToggle" aria-label="切换菜单"><i class="bi bi-list"></i></button>
       {% if user_features.get('search') %}
@@ -143,12 +144,19 @@
     </header>
     {% endif %}
 
-    <main class="app-content">
+    <main class="app-content{% if os_chrome %} app-content-os{% endif %}">
+      {% if os_chrome and g.current_user %}
+      <div class="financeos-app-bar">
+        <strong class="financeos-brand">FinanceOS</strong>
+        <span class="financeos-app-title">{{ self.title()|striptags|trim }}</span>
+        <span class="financeos-user">{{ g.current_user.username }}</span>
+      </div>
+      {% endif %}
       {% block page_header %}{% endblock %}
       {% block content %}{% endblock %}
     </main>
 
-    {% if g.current_user and request.path not in ('/login',) %}
+    {% if g.current_user and request.path not in ('/login',) and not os_chrome %}
     <footer class="app-footer site-trust-compact">
       <div>
         <span>{{ company_legal_name|default('智能财务科技') }}</span>
@@ -165,7 +173,7 @@
   </div>
 </div>
 
-{% if g.current_user and request.path not in ('/login',) %}
+{% if g.current_user and request.path not in ('/login',) and not os_chrome %}
 <div class="sidebar-backdrop d-lg-none" id="sidebarBackdrop"></div>
 
 {% if user_features.get('ai') %}

@@ -46,7 +46,7 @@
       <i class="bi bi-box-arrow-left"></i> 返回表格编辑
     </button>
     <button class="btn btn-sm btn-primary" type="button" onclick="showCollabInviteModal()">
-      <i class="bi bi-send"></i> 邀请好友协作
+      <i class="bi bi-send"></i> 邀请同事协作
     </button>
     <button class="btn btn-sm btn-outline-secondary" type="button" onclick="copyCollabLink()">
       <i class="bi bi-link-45deg"></i> 复制链接
@@ -71,9 +71,15 @@
       <button class="btn btn-sm btn-outline-primary" onclick="showAddColDialog()"><i class="bi bi-plus-circle"></i> 加列</button>
       <button class="btn btn-sm btn-outline-danger" onclick="deleteSelectedRow()"><i class="bi bi-trash"></i> 删行</button>
       <button class="btn btn-sm btn-outline-warning" id="saveIndicator"><i class="bi bi-check2"></i> 已自动保存</button>
+      {% set uf = user_features|default({}) %}
+      {% if uf.get('dashboard') or uf.get('analysis') %}
       <button type="button" class="btn btn-sm btn-success" id="btnFinishEdit" onclick="finishEditAndGo()">
         <i class="bi bi-arrow-right"></i> 完成编辑，去审计
       </button>
+      {% else %}
+      <button type="button" class="btn btn-sm btn-outline-success" id="btnFinishEdit" onclick="finishEditAndGo()" style="display:none" aria-hidden="true"></button>
+      <a href="/" class="btn btn-sm btn-outline-secondary"><i class="bi bi-check2"></i> 完成编辑</a>
+      {% endif %}
     </div>
   </div>
 </div>
@@ -104,11 +110,11 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title">邀请好友协同编辑</h5>
+        <h5 class="modal-title">邀请同事协同编辑</h5>
         <button class="btn-close" data-bs-dismiss="modal"></button>
       </div>
       <div class="modal-body">
-        <p class="small text-muted">选择好友后，系统会发送协同编辑链接到消息页，对方点击即可一起编辑表格。</p>
+        <p class="small text-muted">可邀请同公司同事或好友；系统会发送协同编辑链接到对方消息，点击即可一起编辑。</p>
         <div id="collabFriendList" class="list-group"></div>
       </div>
     </div>
@@ -119,6 +125,7 @@
 {% block extra_scripts %}
 <script>
 const COLLAB_TOKEN = {{ collab_token|tojson }};
+const USER_FEATURES = {{ (user_features|default({}))|tojson }};
 let collabMode = !!COLLAB_TOKEN;
 let collabToken = COLLAB_TOKEN || '';
 let collabVersion = 0;
@@ -195,8 +202,10 @@ function exitCollabToNormalEdit() {
 function finishEditAndGo() {
   const btn = document.getElementById('btnFinishEdit');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> 保存中…'; }
+  const auditTarget = USER_FEATURES.dashboard ? '/dashboard'
+    : (USER_FEATURES.analysis ? '/analysis' : '/');
   flushAllSaves().finally(() => {
-    const go = () => { window.location.href = '/'; };
+    const go = () => { window.location.href = auditTarget; };
     if (collabMode) applyCollabToSource().finally(go);
     else go();
   });
@@ -380,18 +389,28 @@ function startCollabSession() {
 
 function showCollabInviteModal() {
   if (!collabToken) { startCollabSession(); return; }
-  fetch('/api/friends')
-    .then(r => r.json())
-    .then(d => {
+  Promise.all([
+    fetch('/api/colleagues', { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({})),
+    fetch('/api/friends', { credentials: 'same-origin' }).then(r => r.json()).catch(() => ({})),
+  ]).then(([colRes, friRes]) => {
       const box = document.getElementById('collabFriendList');
-      if (!d.success || !d.friends.length) {
-        box.innerHTML = '<div class="text-muted small py-2">暂无好友，请先在个人空间添加好友</div>';
+      const byId = {};
+      (colRes.colleagues || []).forEach(c => {
+        byId[c.id] = { id: c.id, username: c.username, tag: '同事' };
+      });
+      (friRes.friends || []).forEach(f => {
+        const fid = f.other_id;
+        if (!byId[fid]) byId[fid] = { id: fid, username: f.username, tag: '好友' };
+        else byId[fid].tag = '同事/好友';
+      });
+      const people = Object.values(byId);
+      if (!people.length) {
+        box.innerHTML = '<div class="text-muted small py-2">暂无可邀请人员。请先在个人资料填写相同公司名，或添加好友。</div>';
       } else {
-        box.innerHTML = d.friends.map(f => {
-          const fid = f.other_id;
+        box.innerHTML = people.map(p => {
           return `<button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center"
-            data-fid="${fid}" data-name="${escapeHtml(f.username)}">
-            <span><i class="bi bi-person"></i> ${escapeHtml(f.username)}</span>
+            data-fid="${p.id}" data-name="${escapeHtml(p.username)}">
+            <span><i class="bi bi-person"></i> ${escapeHtml(p.username)} <span class="badge bg-light text-muted ms-1">${p.tag}</span></span>
             <span class="badge bg-primary">发送邀请</span>
           </button>`;
         }).join('');

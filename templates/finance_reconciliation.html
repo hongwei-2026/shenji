@@ -8,7 +8,7 @@
 <div class="row g-3 mb-3" id="bankCards"></div>
 <div class="card border-0 shadow-sm mb-3"><div class="card-header bg-transparent d-flex justify-content-between">
   <strong>银行流水</strong>
-  <button class="btn btn-sm btn-outline-secondary" onclick="importSample()">导入示例流水</button>
+  <span class="small text-muted">通过 API 导入真实流水，不再内置示例数据</span>
 </div><div class="card-body p-0">
 <table class="table table-sm mb-0"><thead><tr><th>日期</th><th>摘要</th><th class="text-end">金额</th><th>匹配</th></tr></thead>
 <tbody id="txnBody"><tr><td colspan="4" class="text-center py-3 text-muted">请选择账户</td></tr></tbody></table>
@@ -23,7 +23,7 @@ function loadBanks() {
   fetch('/api/finance/bank/accounts').then(r=>r.json()).then(d => {
     const cards = document.getElementById('bankCards');
     const list = d.accounts || [];
-    if (!list.length) { cards.innerHTML = '<div class="col-12 text-muted">暂无银行账户</div>'; return; }
+    if (!list.length) { cards.innerHTML = '<div class="col-12 text-muted">暂无银行账户，请先在财务系统中录入真实账户后再对账</div>'; return; }
     bankId = list[0].id;
     cards.innerHTML = list.map((b,i) => `<div class="col-md-4"><div class="card border-0 shadow-sm ${i===0?'border-primary':''}" style="cursor:pointer" onclick="selectBank(${b.id},this)">
       <div class="card-body"><div class="small text-muted">${b.bank_name}</div><div>${b.account_no}</div>
@@ -38,17 +38,8 @@ function loadTxns() {
     document.getElementById('txnBody').innerHTML = (d.txns||[]).map(t => `<tr>
       <td>${t.txn_date}</td><td>${t.summary||''}</td>
       <td class="text-end ${t.direction==='in'?'text-success':'text-danger'}">${t.direction==='in'?'+':'-'}${formatCurrency(t.amount)}</td>
-      <td>${t.matched?'已匹配':'未匹配'}</td></tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted py-3">暂无流水，可导入</td></tr>';
+      <td>${t.matched?'已匹配':'未匹配'}</td></tr>`).join('') || '<tr><td colspan="4" class="text-center text-muted py-3">暂无流水</td></tr>';
   });
-}
-function importSample() {
-  if (!bankId) return;
-  const today = new Date().toISOString().slice(0,10);
-  fetch(`/api/finance/bank/${bankId}/import`, { method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ txns: [
-      { txn_date: today, summary: '客户货款', amount: 5000 },
-      { txn_date: today, summary: '办公采购', amount: -800 },
-    ]}) }).then(r=>r.json()).then(d => { if(d.success){ showToast('已导入 '+d.imported+' 条','success'); loadTxns(); }});
 }
 function runRecon() {
   if (!bankId) return;

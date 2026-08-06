@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=凭证
+Comment=FinanceOS · 凭证管理
+Exec=financeos-open vouchers
+Icon=financeos-vouchers
+Terminal=false
+Categories=Office;Finance;

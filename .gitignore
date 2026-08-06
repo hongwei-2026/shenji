@@ -8,6 +8,7 @@ data/*
 !data/models/
 !data/models/README.md
 !data/models/inference_policy.json
+data/userspace/
 data/.secret_key
 shared_files/*
 .env
@@ -27,3 +28,5 @@ static/downloads/*.hap
 coverage.xml
 htmlcov/
 .ruff_cache/
+bin/meilisearch
+data/meilisearch/

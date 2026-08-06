@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FinanceOS</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="desktop" class="desktop">
+    <header class="desktop-brand">
+      <div class="brand-mark">F</div>
+      <div>
+        <strong>FinanceOS</strong>
+        <small>财务操作系统</small>
+      </div>
+    </header>
+
+    <div id="iconGrid" class="icon-grid" aria-label="桌面应用"></div>
+
+    <div id="startMenu" class="start-menu" hidden>
+      <div class="start-head">
+        <strong>开始</strong>
+        <button type="button" id="btnLogin" class="btn-text">登录 / 切换账号</button>
+      </div>
+      <div id="startList" class="start-list"></div>
+      <div class="start-foot">
+        <button type="button" id="btnRefresh">刷新应用</button>
+        <button type="button" id="btnQuit">退出 FinanceOS</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="taskbar">
+    <button type="button" id="btnStart" class="taskbar-start" title="开始">
+      <span class="start-logo">F</span>
+      <span>开始</span>
+    </button>
+    <div id="taskApps" class="taskbar-apps"></div>
+    <div class="taskbar-tray">
+      <span id="clock"></span>
+    </div>
+  </footer>
+
+  <div id="statusToast" class="toast" hidden></div>
+  <script src="shell.js"></script>
+</body>
+</html>

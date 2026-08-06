@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en" translate="no">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="google" content="notranslate">
+<title>FinanceOS</title>
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<link rel="stylesheet" href="{{ url_for('static', filename='vendor/bootstrap-icons/bootstrap-icons.min.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/financeos-desktop.css') }}?v={{ ui_build }}">
+<script>
+  // 清掉可能缓存旧桌面脚本的 Service Worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.getRegistrations().then((regs) => {
+      regs.forEach((r) => r.update());
+    });
+    if (window.caches) {
+      caches.keys().then((keys) => keys.filter((k) => k.startsWith('finance-shell')).forEach((k) => {
+        if (k !== 'finance-shell-v3') caches.delete(k);
+      }));
+    }
+  }
+</script>
+</head>
+<body class="win11">
+  <div id="desktop" class="desktop" aria-label="FinanceOS">
+    <div class="wallpaper" aria-hidden="true"></div>
+    <div id="iconGrid" class="icon-grid" aria-label="Desktop shortcuts">
+      <button type="button" class="desk-icon" data-boot-app="audit" title="仪表盘">
+        <span class="glyph" style="background:#1d4ed8">盘</span>
+        <span class="label">仪表盘</span>
+      </button>
+      <button type="button" class="desk-icon" data-boot-app="edit" title="表格编辑">
+        <span class="glyph" style="background:#0d9488">编</span>
+        <span class="label">表格编辑</span>
+      </button>
+    </div>
+    <div id="windowLayer" class="window-layer"></div>
+
+    <div id="startSmoke" class="start-smoke" aria-hidden="true"></div>
+
+    <div id="startMenu" class="start-menu" aria-hidden="true">
+      <div class="start-search-row">
+        <i class="bi bi-search"></i>
+        <input id="startFilter" type="search" placeholder="Search apps, settings, documents" autocomplete="off">
+      </div>
+      <div class="start-section-head">
+        <span>Pinned</span>
+        <button type="button" id="btnAllApps" class="linkish">All apps ›</button>
+      </div>
+      <div id="startPinned" class="start-pinned"></div>
+      <div class="start-section-head">
+        <span>Recommended</span>
+        <button type="button" id="btnViewMode" class="linkish">View: Category</button>
+      </div>
+      <div id="startCategories" class="start-categories"></div>
+      <div id="startList" class="start-list is-hidden"></div>
+      <div class="start-foot">
+        <div class="start-user-card">
+          <span class="avatar">{{ (g.current_user.username[:1] if g.current_user else 'U')|upper }}</span>
+          <strong>{{ g.current_user.username if g.current_user else '' }}</strong>
+        </div>
+        <div class="start-foot-actions">
+          <button type="button" id="btnRefresh" title="Refresh">⟳</button>
+          <a href="/logout" title="Sign out">⏻</a>
+        </div>
+      </div>
+    </div>
+
+    <div id="folderFlyout" class="folder-flyout" aria-hidden="true">
+      <div class="folder-flyout-head">
+        <button type="button" id="folderBack" class="linkish">‹ Back</button>
+        <strong id="folderTitle">Folder</strong>
+      </div>
+      <div id="folderGrid" class="folder-grid"></div>
+    </div>
+  </div>
+
+  <footer class="taskbar">
+    <div class="taskbar-center">
+      <button type="button" id="btnStart" class="taskbar-start" title="FinanceOS" aria-label="Start" aria-expanded="false">
+        <svg class="fos-logo" viewBox="0 0 32 32" aria-hidden="true">
+          <defs>
+            <linearGradient id="fosGrad" x1="0" y1="0" x2="1" y2="1">
+              <stop stop-color="#60cdff"/>
+              <stop offset="1" stop-color="#6366f1"/>
+            </linearGradient>
+          </defs>
+          <circle cx="16" cy="16" r="15" fill="url(#fosGrad)"/>
+          <path fill="#0b1220" d="M10 20c2.2-5 5-8 6-8s3.8 3 6 8c-2.1 1.2-4 1.8-6 1.8S12.1 21.2 10 20z"/>
+          <circle cx="16" cy="12" r="2.2" fill="#0b1220"/>
+        </svg>
+      </button>
+      <form id="aiCmdForm" class="ai-cmd" title="Ask FinanceOS AI">
+        <button type="button" id="btnVoice" class="ai-mic" title="Voice"><i class="bi bi-mic"></i></button>
+        <input id="aiCmdInput" type="text" placeholder="Ask AI to open an app…" autocomplete="off">
+        <button type="submit" class="ai-go" title="Go">↵</button>
+      </form>
+      <div id="taskApps" class="taskbar-apps"></div>
+    </div>
+    <div class="taskbar-tray">
+      <span id="svcDot" class="svc-dot" title="Status"></span>
+      <button type="button" id="trayClock" class="tray-clock">
+        <span id="clock"></span>
+        <span id="clockDate" class="clock-date"></span>
+      </button>
+    </div>
+  </footer>
+
+  <div id="assistBar" class="assist-bar" hidden></div>
+  <div id="statusToast" class="toast" hidden></div>
+  <script>
+    window.__FOS_USER = {{ {
+      'username': g.current_user.username if g.current_user else '',
+      'role': g.current_user.role if g.current_user else '',
+    }|tojson }};
+    window.__FOS_BRAND = {{ {'name': 'FinanceOS', 'short': 'FinanceOS'}|tojson }};
+  </script>
+  <script src="{{ url_for('static', filename='js/financeos-desktop.js') }}?v={{ ui_build }}"></script>
+</body>
+</html>

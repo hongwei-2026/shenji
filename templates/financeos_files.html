@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en" translate="no">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Files · FinanceOS</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/financeos-files.css') }}?v={{ ui_build }}">
+</head>
+<body>
+  <div class="fm-shell">
+    <aside class="fm-side">
+      <button type="button" data-path="Desktop">Desktop</button>
+      <button type="button" data-path="Documents">Documents</button>
+      <button type="button" data-path="Downloads">Downloads</button>
+      <button type="button" data-path="Apps">Apps</button>
+    </aside>
+    <main class="fm-main">
+      <div class="fm-toolbar">
+        <button type="button" id="btnUp">↑</button>
+        <input id="fmPath" readonly value="">
+        <button type="button" id="btnNewFile">+ File</button>
+        <button type="button" id="btnNewDir">+ Folder</button>
+        <button type="button" id="btnPin">Pin to Desktop</button>
+        <button type="button" id="btnRefresh">↻</button>
+      </div>
+      <div id="fmList" class="fm-list"></div>
+      <pre id="fmPreview" class="fm-preview" hidden></pre>
+    </main>
+  </div>
+  <script src="{{ url_for('static', filename='js/financeos-files.js') }}?v={{ ui_build }}"></script>
+</body>
+</html>

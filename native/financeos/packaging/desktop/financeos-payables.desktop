@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=应付
+Comment=FinanceOS · 应付账款
+Exec=financeos-open payables
+Icon=financeos-payables
+Terminal=false
+Categories=Office;Finance;
