@@ -77,51 +77,86 @@
     if (t) navigate(t.url, { push: false, restore: true });
   }
 
+  /** 网址 / 域名 → 打开；其余用百度搜索。 */
+  function resolveNavInput(raw) {
+    const text = (raw || '').trim();
+    if (!text || text === 'about:home') return 'about:home';
+    if (text.startsWith('about:') || text.startsWith('/')) return text;
+    if (/^https?:\/\//i.test(text)) return text;
+    if (/^[\w.-]+\.[a-zA-Z]{2,}(\/.*)?$/.test(text)) return `https://${text}`;
+    return `https://www.baidu.com/s?wd=${encodeURIComponent(text)}`;
+  }
+
+  function needsEmbedProxy(url) {
+    try {
+      const host = new URL(url).hostname.toLowerCase();
+      return host.endsWith('baidu.com') || host.endsWith('baidu.cn');
+    } catch {
+      return false;
+    }
+  }
+
+  function displayAddr(url) {
+    if (!url || url === 'about:home') return '';
+    try {
+      const u = new URL(url, location.origin);
+      const wd = u.searchParams.get('wd');
+      if ((u.hostname.includes('baidu.com') || u.hostname.includes('baidu.cn')) && wd) {
+        return wd;
+      }
+    } catch { /* ignore */ }
+    return url;
+  }
+
+  async function loadViaProxy(url, viewEl) {
+    setState('百度搜索加载中…');
+    const res = await fetch(`/api/browser/gecko?url=${encodeURIComponent(url)}`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || '加载失败');
+    if (data.internal && data.url && data.url.startsWith('/')) {
+      viewEl.removeAttribute('srcdoc');
+      const sep = data.url.includes('?') ? '&' : '?';
+      viewEl.src = data.url.includes('chrome=os') ? data.url : `${data.url}${sep}chrome=os`;
+      return data;
+    }
+    viewEl.removeAttribute('src');
+    viewEl.srcdoc = data.html || '';
+    return data;
+  }
+
   async function navigate(raw, { push = true, restore = false } = {}) {
     const tab = activeTab();
     if (!tab) return;
     setState('加载中…');
-    let url = (raw || '').trim() || 'about:home';
-    addrInput.value = url === 'about:home' ? '' : url;
+    let url = resolveNavInput(raw);
+    addrInput.value = displayAddr(url);
 
     try {
-      if (engine === 'blink') {
-        if (url === 'about:home') {
-          blinkView.src = '/api/browser/home';
-        } else if (url.startsWith('/')) {
-          const sep = url.includes('?') ? '&' : '?';
-          blinkView.src = url.includes('chrome=os') ? url : `${url}${sep}chrome=os`;
-        } else {
-          // 外链：Blink 直接 iframe（部分站点可能拒绝嵌入）
-          if (!/^https?:\/\//i.test(url) && !url.startsWith('about:')) {
-            url = `https://${url}`;
-            addrInput.value = url;
-          }
-          blinkView.src = url;
-        }
-        tab.title = url === 'about:home' ? '主页' : (new URL(url, location.origin)).hostname || '页面';
+      const view = engine === 'blink' ? blinkView : geckoView;
+
+      if (url === 'about:home') {
+        view.removeAttribute('srcdoc');
+        view.src = '/api/browser/home';
+        tab.title = '主页';
+      } else if (url.startsWith('/')) {
+        view.removeAttribute('srcdoc');
+        const sep = url.includes('?') ? '&' : '?';
+        view.src = url.includes('chrome=os') ? url : `${url}${sep}chrome=os`;
+        tab.title = url.startsWith('/search') ? '站内搜索' : '页面';
+      } else if (engine === 'gecko' || needsEmbedProxy(url)) {
+        // 百度等禁止 iframe 的站点：服务端抓取后渲染
+        const data = await loadViaProxy(url, view);
+        url = data.url || url;
+        addrInput.value = displayAddr(url);
+        tab.title = needsEmbedProxy(url) ? '百度' : (data.title || '页面');
       } else {
-        // Gecko 模式：同源走 chrome=os，外链走 Gecko 代理
-        if (url === 'about:home') {
-          geckoView.srcdoc = '';
-          geckoView.src = '/api/browser/home?engine=gecko';
-          tab.title = '主页';
-        } else if (url.startsWith('/')) {
-          const sep = url.includes('?') ? '&' : '?';
-          geckoView.src = url.includes('chrome=os') ? url : `${url}${sep}chrome=os`;
-          tab.title = url;
-        } else {
-          setState('Gecko 抓取中…');
-          const res = await fetch(`/api/browser/gecko?url=${encodeURIComponent(url)}`);
-          const data = await res.json();
-          if (!data.success) throw new Error(data.error || 'Gecko 加载失败');
-          geckoView.removeAttribute('src');
-          geckoView.srcdoc = data.html || '';
-          url = data.url || url;
-          addrInput.value = url;
-          tab.title = data.title || 'Gecko';
-        }
+        // Blink 直接加载可嵌入外链
+        view.removeAttribute('srcdoc');
+        view.src = url;
+        try { tab.title = new URL(url).hostname || '页面'; }
+        catch { tab.title = '页面'; }
       }
+
       tab.url = url;
       if (push && !restore) {
         tab.history = tab.history.slice(0, tab.histIdx + 1);
@@ -132,9 +167,9 @@
       setState('完成');
     } catch (e) {
       setState(e.message || '失败');
-      if (engine === 'gecko') {
-        geckoView.srcdoc = `<html><body style="font-family:sans-serif;padding:24px;color:#b91c1c">${e.message}</body></html>`;
-      }
+      const view = engine === 'blink' ? blinkView : geckoView;
+      view.removeAttribute('src');
+      view.srcdoc = `<html><body style="font-family:sans-serif;padding:24px;color:#b91c1c">${e.message || '失败'}</body></html>`;
     }
   }
 
@@ -159,6 +194,12 @@
   document.getElementById('btnNewTab').onclick = () => createTab();
   document.querySelectorAll('.eng').forEach((btn) => {
     btn.onclick = () => setEngine(btn.dataset.engine);
+  });
+
+  window.addEventListener('message', (ev) => {
+    const d = ev.data || {};
+    if (d.source !== 'financeos-browser-home') return;
+    if (d.type === 'navigate' && (d.q || d.url)) navigate(d.q || d.url);
   });
 
   createTab('about:home', '主页');

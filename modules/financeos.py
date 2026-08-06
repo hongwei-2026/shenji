@@ -17,7 +17,7 @@ FINANCEOS_APPS: list[dict[str, Any]] = [
         'path': '/finance',
         'feature': 'finance',
         'category': 'finance',
-        'pinned': True,
+        'pinned': False,
     },
     {
         'id': 'vouchers',
@@ -30,7 +30,7 @@ FINANCEOS_APPS: list[dict[str, Any]] = [
         'path': '/finance/vouchers',
         'feature': 'vouchers',
         'category': 'finance',
-        'pinned': True,
+        'pinned': False,
     },
     {
         'id': 'receivables',
@@ -133,15 +133,16 @@ FINANCEOS_APPS: list[dict[str, Any]] = [
     },
     {
         'id': 'edit',
-        'name': 'Editor',
-        'aliases': ['编辑', '表格编辑', 'edit'],
+        'name': '表格编辑',
+        'aliases': ['编辑', '表格编辑', 'edit', 'Editor', '表格'],
         'description': '在线校对与协同编辑',
         'icon': 'table',
         'glyph': '编',
         'color': '#0d9488',
         'path': '/edit',
-        'feature': 'edit',
+        'feature': None,  # 全员可用：桌面核心「表格编辑」
         'category': 'data',
+        'pinned': True,
     },
     {
         'id': 'preview',
@@ -158,16 +159,14 @@ FINANCEOS_APPS: list[dict[str, Any]] = [
     # —— 审计分析 ——
     {
         'id': 'audit',
-        'name': 'Audit',
-        'aliases': ['审计', '审计概览', 'audit'],
+        'name': '仪表盘',
+        'aliases': ['仪表盘', '审计', '审计概览', 'audit', 'dashboard', 'Dashboard'],
         'description': '三阶段审计与风险看板',
         'icon': 'clipboard2-check',
-        'glyph': '审',
+        'glyph': '盘',
         'color': '#1d4ed8',
         'path': '/dashboard',
-        'feature': 'dashboard',
-        'alt_feature': 'analysis',
-        'alt_path': '/analysis',
+        'feature': None,  # 全员可用：桌面核心「仪表盘」
         'category': 'audit',
         'pinned': True,
     },
@@ -207,21 +206,20 @@ FINANCEOS_APPS: list[dict[str, Any]] = [
         'feature': 'history',
         'category': 'audit',
     },
-    # —— AI ——
+    # —— AI（桌面快捷方式，不自动打开）——
     {
         'id': 'ai-agent',
-        'name': 'AI Agent',
-        'aliases': ['助手', '智能体', 'agent'],
-        'description': '智能财务审计助手',
+        'name': 'AI',
+        'aliases': ['助手', '智能体', 'agent', 'ai', '对话'],
+        'description': 'AI Operating System assistant — open apps by chat',
         'icon': 'robot',
         'glyph': 'AI',
         'color': '#6366f1',
-        'path': '/agent',
-        'feature': 'agent',
-        'alt_feature': 'ai',
-        'alt_path': '/agent',
+        'path': '/os-ai',
+        'feature': None,  # 所有登录用户可用
         'category': 'ai',
         'pinned': True,
+        'kind': 'ai',
     },
     {
         'id': 'models',
@@ -262,7 +260,35 @@ FINANCEOS_APPS: list[dict[str, Any]] = [
         'category': 'collab',
         'pinned': True,
     },
-    # —— 系统 / 搜索 / 浏览器 ——
+    # —— 系统：文件 / 终端 / 浏览器 ——
+    {
+        'id': 'files',
+        'name': 'Files',
+        'aliases': ['文件', '文件管理器', 'files', 'explorer'],
+        'description': 'File manager — Desktop / Documents / Downloads',
+        'icon': 'folder2-open',
+        'glyph': '📁',
+        'color': '#ca8a04',
+        'path': '/files',
+        'feature': None,
+        'category': 'system',
+        'pinned': True,
+        'kind': 'files',
+    },
+    {
+        'id': 'terminal',
+        'name': 'Terminal',
+        'aliases': ['终端', 'terminal', 'shell', 'cmd'],
+        'description': 'Sandboxed FinanceOS terminal',
+        'icon': 'terminal',
+        'glyph': '>_',
+        'color': '#111827',
+        'path': '/terminal',
+        'feature': None,
+        'category': 'system',
+        'pinned': True,
+        'kind': 'terminal',
+    },
     {
         'id': 'browser',
         'name': 'Browser',
@@ -288,7 +314,7 @@ FINANCEOS_APPS: list[dict[str, Any]] = [
         'path': '/search?q=财务',
         'feature': 'search',
         'category': 'system',
-        'pinned': True,
+        'pinned': False,
     },
     {
         'id': 'company',
@@ -326,6 +352,7 @@ FINANCEOS_APPS: list[dict[str, Any]] = [
         'path': '/profile',
         'feature': None,
         'category': 'system',
+        'pinned': True,
     },
 ]
 
@@ -377,7 +404,8 @@ def list_apps_for_user(user: dict | None) -> list[dict[str, Any]]:
 
 def app_url(app: dict[str, Any], base: str = '') -> str:
     path = app.get('path') or '/'
-    if path.startswith('/browser'):
+    kind = app.get('kind') or ''
+    if kind in ('browser', 'files', 'terminal', 'ai') or path.startswith(('/browser', '/files', '/terminal', '/os-ai')):
         return f"{base.rstrip('/')}{path}"
     sep = '&' if '?' in path else '?'
     return f"{base.rstrip('/')}{path}{sep}chrome=os"

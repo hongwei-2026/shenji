@@ -31,10 +31,24 @@ def normalize_url(raw: str) -> str:
                 return raw
             raw = 'https://' + raw
         else:
-            # 当作搜索词
+            # 关键词 → 百度搜索
             from urllib.parse import quote
-            return f'https://duckduckgo.com/?q={quote(raw)}'
+            return f'https://www.baidu.com/s?wd={quote(raw)}'
     return raw
+
+
+def baidu_search_url(query: str) -> str:
+    from urllib.parse import quote
+    return f'https://www.baidu.com/s?wd={quote((query or "").strip())}'
+
+
+def needs_embed_proxy(url: str) -> bool:
+    """这些站点通常禁止 iframe 嵌入，需走服务端代理渲染。"""
+    try:
+        host = (urlparse(url).hostname or '').lower()
+    except Exception:
+        return False
+    return host.endswith('baidu.com') or host.endswith('baidu.cn')
 
 
 def is_safe_external(url: str) -> tuple[bool, str]:
@@ -156,10 +170,19 @@ border-radius:12px;padding:16px}
 .card strong{display:block;margin-bottom:6px}
 .card small{color:#94a3b8;font-size:12px;line-height:1.5}
 .hints a{color:#60a5fa;margin-right:14px;text-decoration:none}
+.search{display:flex;gap:8px;margin:20px 0 8px}
+.search input{flex:1;border:0;border-radius:999px;padding:12px 18px;font-size:15px;outline:none}
+.search button{border:0;border-radius:999px;padding:0 20px;background:#2932e1;color:#fff;font-weight:600;cursor:pointer}
+.badge{display:inline-block;margin-top:8px;font-size:12px;color:#93c5fd}
 </style></head><body>
 <div class="wrap">
   <h1>AI 财务浏览器</h1>
-  <p>双内核：Blink（Chromium 系实时渲染）与 Gecko（Firefox UA 服务端渲染沙箱）。</p>
+  <p>双内核浏览。地址栏输入关键词将使用 <strong style="color:#fff">百度搜索</strong>。</p>
+  <form class="search" id="baiduForm">
+    <input type="search" id="baiduQ" name="wd" placeholder="百度一下…" value="" autocomplete="off">
+    <button type="submit">百度一下</button>
+  </form>
+  <span class="badge">搜索引擎：百度 Baidu</span>
   <div class="engines">
     <div class="card"><strong>Blink</strong><small>使用宿主 Chromium / Chrome 内核 iframe 加载，适合同站应用与公开站点。</small></div>
     <div class="card"><strong>Gecko</strong><small>以 Firefox User-Agent 抓取并净化渲染，适合对照内核差异与安全浏览。</small></div>
@@ -168,8 +191,20 @@ border-radius:12px;padding:16px}
     <a href="/os">返回桌面</a>
     <a href="/finance?chrome=os">财务总览</a>
     <a href="/agent?chrome=os">AI Agent</a>
-    <a href="/search?q=审计&chrome=os">Meilisearch 搜索</a>
+    <a href="/search?q=审计&chrome=os">站内知识库</a>
   </div>
 </div>
+<script>
+document.getElementById('baiduForm').addEventListener('submit', function (e) {
+  e.preventDefault();
+  var q = (document.getElementById('baiduQ').value || '').trim();
+  if (!q) return;
+  try {
+    parent.postMessage({ source: 'financeos-browser-home', type: 'navigate', q: q }, '*');
+  } catch (err) {
+    location.href = 'https://www.baidu.com/s?wd=' + encodeURIComponent(q);
+  }
+});
+</script>
 </body></html>
 """

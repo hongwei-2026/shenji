@@ -1,0 +1,17 @@
+:root { font-family: Consolas, "Cascadia Mono", "Courier New", monospace; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #0c0c0c; color: #cccccc; }
+.term-shell { height: 100%; display: grid; grid-template-rows: 1fr auto; }
+.term-out {
+  overflow: auto; padding: 12px; white-space: pre-wrap; font-size: 13px; line-height: 1.45;
+}
+.term-out .err { color: #f87171; }
+.term-out .cmd { color: #60cdff; }
+.term-form {
+  display: flex; gap: 8px; align-items: center; padding: 8px 12px;
+  border-top: 1px solid #222; background: #111;
+}
+.term-prompt { color: #3ddc97; white-space: nowrap; font-size: 13px; }
+.term-form input {
+  flex: 1; border: 0; background: transparent; color: #fff; outline: none; font: inherit;
+}

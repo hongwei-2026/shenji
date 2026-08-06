@@ -101,7 +101,11 @@ def test_financeos_apps_filtered_by_role(client):
     ids = {a['id'] for a in data['apps']}
     assert 'vouchers' in ids
     assert 'settings' in ids
-    assert 'audit' not in ids
+    assert 'audit' in ids  # 仪表盘为全员核心应用
+    assert 'edit' in ids   # 表格编辑为全员核心应用
+    # 会计仍无深度审计报告签发类（若仍按 feature 过滤）
+    # report 仍受角色限制
+    assert 'report' not in ids
 
 
 def test_register_normal_user_without_company(client):
@@ -156,10 +160,63 @@ def test_list_apps_helper_rbac():
     ids = {a['id'] for a in list_apps_for_user(auditor)}
     assert 'audit' in ids
     assert 'browser' in ids
+    assert 'files' in ids
+    assert 'terminal' in ids
     assert 'vouchers' not in ids
 
     accountant = {'id': 2, 'role': 'accountant', 'preferences': '{}', 'company': 'X'}
     ids2 = {a['id'] for a in list_apps_for_user(accountant)}
     assert 'vouchers' in ids2
-    assert 'audit' not in ids2
+    assert 'audit' in ids2  # 仪表盘全员可见
+    assert 'edit' in ids2
     assert 'browser' in ids2
+    assert 'ai-agent' in ids2
+    assert 'report' not in ids2
+
+
+def test_os_desktop_has_ai_logo_and_assist(auth_client):
+    resp = auth_client.get('/os')
+    html = resp.get_data(as_text=True)
+    assert 'fos-logo' in html
+    assert 'assistBar' in html
+    assert '仪表盘' in html
+    assert '表格编辑' in html
+    assert 'win-logo' not in html
+
+
+def test_ai_files_terminal_pages(auth_client):
+    for path in ('/os-ai', '/files', '/terminal'):
+        resp = auth_client.get(path)
+        assert resp.status_code == 200, path
+
+
+def test_fos_shortcuts_and_files_api(auth_client):
+    sc = auth_client.get('/api/fos/shortcuts')
+    assert sc.status_code == 200
+    data = sc.get_json()
+    assert data['success'] is True
+    ids = {i.get('app_id') for i in data['items']}
+    assert 'ai-agent' in ids
+    assert 'audit' in ids or 'edit' in ids  # role-dependent core apps
+    names = {i.get('name') for i in data['items']}
+    # 若有审计权限，桌面应显示「仪表盘」
+    if 'audit' in ids:
+        assert '仪表盘' in names
+    if 'edit' in ids:
+        assert '表格编辑' in names
+
+    files = auth_client.get('/api/fos/files?path=Desktop')
+    assert files.status_code == 200
+    assert files.get_json()['success'] is True
+
+    term = auth_client.post('/api/fos/terminal', json={'cmd': 'help', 'cwd': 'Desktop'})
+    assert term.status_code == 200
+    assert 'help' in (term.get_json().get('output') or '').lower()
+
+
+def test_fos_assist_suggestions():
+    from modules.fos_assist import suggest_for
+
+    s = suggest_for('audit')
+    assert any(x['app_id'] == 'analysis' for x in s)
+    assert s[0].get('auto_open') is False

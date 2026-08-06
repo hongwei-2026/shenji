@@ -1,17 +1,20 @@
 (() => {
   const FALLBACK = [
+    { id: 'ai-agent', name: 'AI', aliases: ['agent', '助手', 'ai'], path: '/os-ai', glyph: 'AI', color: '#6366f1', pinned: true, kind: 'ai' },
+    { id: 'audit', name: '仪表盘', aliases: ['仪表盘', 'dashboard', '审计'], path: '/dashboard', glyph: '盘', color: '#1d4ed8', pinned: true },
+    { id: 'edit', name: '表格编辑', aliases: ['编辑', '表格', 'edit'], path: '/edit', glyph: '编', color: '#0d9488', pinned: true },
+    { id: 'files', name: 'Files', aliases: ['文件', 'files'], path: '/files', glyph: '📁', color: '#ca8a04', pinned: true, kind: 'files' },
+    { id: 'terminal', name: 'Terminal', aliases: ['终端', 'terminal'], path: '/terminal', glyph: '>_', color: '#111827', pinned: true, kind: 'terminal' },
     { id: 'browser', name: 'Browser', aliases: ['浏览器', 'browser'], path: '/browser', glyph: 'B', color: '#0078d4', pinned: true, kind: 'browser' },
-    { id: 'ai-agent', name: 'AI Agent', aliases: ['agent', '助手'], path: '/agent', glyph: 'AI', color: '#6366f1', pinned: true },
-    { id: 'finance', name: 'Finance', aliases: ['财务', '财务总览'], path: '/finance', glyph: 'F', color: '#0078d4', pinned: true },
-    { id: 'audit', name: 'Audit', aliases: ['审计', '审计概览'], path: '/dashboard', glyph: 'A', color: '#1d4ed8', pinned: true },
-    { id: 'chat', name: 'Chat', aliases: ['消息', '聊天'], path: '/chat', glyph: 'C', color: '#059669', pinned: true },
     { id: 'settings', name: 'Settings', aliases: ['设置'], path: '/profile', glyph: 'S', color: '#64748b' },
   ];
 
   let apps = [];
+  let shortcuts = [];
   let zTop = 10;
   const windows = new Map();
   let recognition = null;
+  let assistTimer = null;
 
   function toast(msg) {
     const el = document.getElementById('statusToast');
@@ -30,14 +33,35 @@
   }
 
   function appUrl(app) {
-    if (app.kind === 'browser' || (app.path || '').startsWith('/browser')) {
-      return app.path || '/browser';
-    }
-    if (app.url && app.url.startsWith('http')) return app.url;
+    const kind = app.kind || '';
     const path = app.url || app.path || '/';
+    if (['browser', 'files', 'terminal', 'ai'].includes(kind)
+      || path.startsWith('/browser') || path.startsWith('/files')
+      || path.startsWith('/terminal') || path.startsWith('/os-ai')) {
+      return path;
+    }
+    if (path.startsWith('http')) return path;
     const sep = path.includes('?') ? '&' : '?';
     return path.includes('chrome=os') ? path : `${path}${sep}chrome=os`;
   }
+
+  function findApp(id) {
+    return apps.find((a) => a.id === id || a.app_id === id);
+  }
+
+  function openAppById(id) {
+    const app = findApp(id);
+    if (app) openApp(app);
+    else toast(`App not found: ${id}`);
+  }
+
+  window.FinanceOS = {
+    openApp: (idOrApp) => {
+      if (typeof idOrApp === 'string') openAppById(idOrApp);
+      else if (idOrApp) openApp(idOrApp);
+    },
+    apps: () => apps.slice(),
+  };
 
   function tickClock() {
     const now = new Date();
@@ -58,6 +82,16 @@
     }
   }
 
+  async function fetchShortcuts() {
+    try {
+      const res = await fetch('/api/fos/shortcuts', { credentials: 'same-origin' });
+      const data = await res.json();
+      if (data.success) shortcuts = data.items || [];
+    } catch {
+      shortcuts = [];
+    }
+  }
+
   async function fetchApps() {
     try {
       const res = await fetch('/api/financeos/apps', { credentials: 'same-origin' });
@@ -71,7 +105,9 @@
     } catch {
       apps = FALLBACK.slice();
     }
+    await fetchShortcuts();
     render();
+    // 登录后只显示桌面快捷方式，不自动打开任何窗口
   }
 
   function focusWin(id) {
@@ -113,7 +149,44 @@
     return btn;
   }
 
-  function openApp(app) {
+  async function runAssist(appId) {
+    clearTimeout(assistTimer);
+    const bar = document.getElementById('assistBar');
+    try {
+      const res = await fetch(`/api/fos/assist?app_id=${encodeURIComponent(appId)}`, { credentials: 'same-origin' });
+      const data = await res.json();
+      // 不自动打开任何辅助窗；也不再推荐弹出 AI（避免一登录/一点应用就弹 AI）
+      const suggestions = (data.suggestions || []).filter(
+        (s) => s.app_id !== 'ai-agent' && findApp(s.app_id) && !windows.has(s.app_id)
+      );
+      if (!suggestions.length) {
+        bar.hidden = true;
+        return;
+      }
+      bar.hidden = false;
+      bar.innerHTML = `<span class="assist-msg">Assist:</span>` +
+        suggestions.map((s) => {
+          const a = findApp(s.app_id);
+          return `<button type="button" data-id="${s.app_id}" title="${s.reason}">${a ? a.name : s.app_id}</button>`;
+        }).join('') +
+        `<button type="button" class="ghost" data-dismiss="1">Dismiss</button>`;
+      bar.querySelectorAll('button').forEach((btn) => {
+        if (btn.dataset.dismiss) {
+          btn.onclick = () => { bar.hidden = true; };
+          return;
+        }
+        btn.onclick = () => {
+          openAppById(btn.dataset.id);
+          bar.hidden = true;
+        };
+      });
+      assistTimer = setTimeout(() => { bar.hidden = true; }, 12000);
+    } catch {
+      bar.hidden = true;
+    }
+  }
+
+  function openApp(app, opts = {}) {
     const existing = windows.get(app.id);
     if (existing) {
       existing.el.classList.remove('minimized');
@@ -123,7 +196,7 @@
     const layer = document.getElementById('windowLayer');
     const offset = (windows.size % 6) * 26;
     const el = document.createElement('div');
-    el.className = 'fos-window';
+    el.className = 'fos-window' + (opts.maximize ? ' maximized' : '');
     el.style.left = `${48 + offset}px`;
     el.style.top = `${24 + offset}px`;
     el.innerHTML = `
@@ -143,6 +216,40 @@
     ensureTaskBtn(app);
     focusWin(app.id);
     bindWindowChrome(app.id, el);
+    if (!opts.silentAssist && app.kind !== 'ai') {
+      runAssist(app.id);
+    }
+  }
+
+  function openFileShortcut(sc) {
+    openApp({
+      id: `file:${sc.file}`,
+      name: sc.name || sc.file,
+      path: `/files`,
+      glyph: sc.glyph || '📄',
+      color: sc.color || '#64748b',
+      kind: 'files',
+    });
+    toast(`Open Files → ${sc.file}`);
+  }
+
+  function openShortcut(sc) {
+    if (sc.kind === 'file') return openFileShortcut(sc);
+    const app = findApp(sc.app_id || sc.id);
+    if (app) {
+      openApp({ ...app, name: sc.name || app.name, path: sc.path || app.path });
+      return;
+    }
+    if (sc.path || sc.app_id) {
+      openApp({
+        id: sc.app_id || sc.id,
+        name: sc.name,
+        path: sc.path || (sc.app_id === 'audit' ? '/dashboard' : sc.app_id === 'edit' ? '/edit' : '/'),
+        glyph: sc.glyph,
+        color: sc.color,
+        kind: sc.kind || 'app',
+      });
+    }
   }
 
   function bindWindowChrome(id, el) {
@@ -257,23 +364,58 @@
       .concat(Object.values(groups).filter((g) => !order.includes(g.key)));
   }
 
+  /** 桌面必显：仪表盘、表格编辑（不依赖接口/权限缓存） */
+  const MUST_DESKTOP = [
+    { id: 'app-audit', kind: 'app', app_id: 'audit', name: '仪表盘', glyph: '盘', color: '#1d4ed8', path: '/dashboard' },
+    { id: 'app-edit', kind: 'app', app_id: 'edit', name: '表格编辑', glyph: '编', color: '#0d9488', path: '/edit' },
+  ];
+
   function renderIcons() {
     const grid = document.getElementById('iconGrid');
-    if (!apps.length) {
-      grid.innerHTML = `<div class="empty-hint">No apps</div>`;
+    const map = new Map();
+    MUST_DESKTOP.forEach((sc) => map.set(sc.app_id, { ...sc }));
+    (shortcuts.length ? shortcuts : []).forEach((sc) => {
+      if (sc.kind === 'app' && (sc.app_id === 'audit' || sc.app_id === 'edit')) {
+        const base = map.get(sc.app_id) || MUST_DESKTOP.find((m) => m.app_id === sc.app_id);
+        map.set(sc.app_id, { ...base, ...sc, name: base.name, glyph: base.glyph, path: base.path });
+        return;
+      }
+      const key = sc.app_id || sc.id;
+      if (!map.has(key)) map.set(key, sc);
+    });
+    // 若接口快捷方式为空，用 pinned / FALLBACK 补齐（仍保留仪表盘/表格编辑在最前）
+    if (shortcuts.length === 0) {
+      const pinned = (apps.filter((a) => a.pinned).length ? apps.filter((a) => a.pinned) : apps.slice(0, 8));
+      pinned.forEach((a) => {
+        if (!map.has(a.id)) {
+          map.set(a.id, {
+            id: `app-${a.id}`, kind: 'app', app_id: a.id, name: a.name,
+            glyph: a.glyph, color: a.color, path: a.path,
+          });
+        }
+      });
+    }
+    const order = ['audit', 'edit', 'ai-agent', 'files', 'terminal', 'browser', 'upload'];
+    const deskItems = Array.from(map.values()).sort((a, b) => {
+      const ia = order.indexOf(a.app_id);
+      const ib = order.indexOf(b.app_id);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+    if (!deskItems.length) {
+      grid.innerHTML = `<div class="empty-hint">No shortcuts</div>`;
       return;
     }
-    const desk = apps.filter((a) => a.pinned).length ? apps.filter((a) => a.pinned) : apps.slice(0, 8);
-    grid.innerHTML = desk.map((app) => `
-      <button type="button" class="desk-icon" data-id="${app.id}" title="${app.name}">
-        <span class="glyph" style="background:${color(app)}">${glyph(app)}</span>
-        <span class="label">${app.name}</span>
+    grid.innerHTML = deskItems.map((sc) => `
+      <button type="button" class="desk-icon" data-sc="${sc.id}" data-app="${sc.app_id || ''}" title="${sc.name}">
+        <span class="glyph" style="background:${sc.color || '#0078d4'}">${sc.glyph || '•'}</span>
+        <span class="label">${sc.name}</span>
       </button>
     `).join('');
     grid.querySelectorAll('.desk-icon').forEach((btn) => {
       btn.onclick = () => {
-        const app = apps.find((a) => a.id === btn.dataset.id);
-        if (app) openApp(app);
+        const sc = deskItems.find((x) => x.id === btn.dataset.sc)
+          || MUST_DESKTOP.find((x) => x.app_id === btn.dataset.app);
+        if (sc) openShortcut(sc);
       };
     });
   }
@@ -479,9 +621,26 @@
     handleAiCommand(document.getElementById('aiCmdInput').value);
   };
 
+  window.addEventListener('message', (ev) => {
+    const d = ev.data || {};
+    if (!d.source || !String(d.source).startsWith('financeos-')) return;
+    if (d.type === 'open_app' && d.app_id) openAppById(d.app_id);
+    if (d.type === 'open_url' && d.url) {
+      const raw = String(d.url).split('?')[0];
+      const matched = apps.find((a) => {
+        const p = String(a.path || '').split('?')[0];
+        return p && (raw === p || raw.startsWith(p) || p.startsWith(raw));
+      });
+      if (matched) openApp(matched);
+      else openApp({ id: `url-${Date.now()}`, name: d.reason || 'App', path: d.url, color: '#0078d4', glyph: '↗' });
+    }
+    if (d.type === 'ai_command' && d.text && !d.from_agent) handleAiCommand(d.text);
+    if (d.type === 'refresh_desktop') fetchShortcuts().then(() => renderIcons());
+    if (d.type === 'toast' && d.message) toast(d.message);
+  });
+
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') closeStart();
-    // Win key simulation: Ctrl+Esc toggles Start
     if (e.ctrlKey && e.key === 'Escape') {
       e.preventDefault();
       toggleStart();
@@ -497,5 +656,15 @@
   setInterval(tickClock, 1000);
   checkHealth();
   setInterval(checkHealth, 15000);
+
+  // HTML 预置图标：在 API 返回前也可打开仪表盘 / 表格编辑
+  document.querySelectorAll('[data-boot-app]').forEach((btn) => {
+    btn.onclick = () => {
+      const id = btn.dataset.bootApp;
+      const sc = MUST_DESKTOP.find((x) => x.app_id === id);
+      if (sc) openShortcut(sc);
+    };
+  });
+
   fetchApps();
 })();

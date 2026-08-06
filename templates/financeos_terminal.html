@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en" translate="no">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Terminal · FinanceOS</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/financeos-terminal.css') }}?v={{ ui_build }}">
+</head>
+<body>
+  <div class="term-shell">
+    <div id="termOut" class="term-out"></div>
+    <form id="termForm" class="term-form">
+      <span id="termPrompt" class="term-prompt">fos:/ $</span>
+      <input id="termInput" type="text" autocomplete="off" spellcheck="false" autofocus>
+    </form>
+  </div>
+  <script src="{{ url_for('static', filename='js/financeos-terminal.js') }}?v={{ ui_build }}"></script>
+</body>
+</html>

@@ -248,7 +248,8 @@ function loadOverview() {
 
       if (!data.success) {
         document.getElementById('statsCards').innerHTML =
-          '<div class="pbi-kpi-card" style="grid-column:1/-1"><div class="lbl">暂无审计数据 — 请先 <a href="/">上传文件</a>。仍可从右侧拖入示例图形搭建仪表盘。</div></div>';
+          '<div class="pbi-kpi-card" style="grid-column:1/-1"><div class="lbl">暂无审计数据 — 请先用桌面 <b>Import</b> 上传 CSV/Excel，或 '
+          + '<a href="/home?chrome=os">点此打开导入</a>。导入后回到本页刷新即可。</div></div>';
         window.__auditDashData = { summary: {}, score: {}, audit_summary: {}, charts: {} };
         requestAnimationFrame(() => {
           const canvas = document.getElementById('auditPbiCanvas');

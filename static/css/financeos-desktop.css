@@ -204,6 +204,42 @@ html, body {
 }
 .taskbar-start:hover, .taskbar-start.active { background: rgba(255,255,255,0.08); }
 .win-logo { width: 18px; height: 18px; color: var(--accent); }
+.fos-logo { width: 22px; height: 22px; display: block; }
+
+.assist-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 60px;
+  transform: translateX(-50%);
+  z-index: 55;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  max-width: min(720px, 92vw);
+  padding: 8px 12px;
+  background: rgba(32,32,32,0.92);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  backdrop-filter: blur(20px);
+  box-shadow: var(--shadow);
+  color: #fff;
+  font-size: 12px;
+}
+.assist-bar[hidden] { display: none !important; }
+.assist-bar .assist-msg { opacity: 0.85; margin-right: 4px; }
+.assist-bar button {
+  border: 0;
+  border-radius: 6px;
+  padding: 6px 10px;
+  background: #6366f1;
+  color: #fff;
+  cursor: pointer;
+  font-size: 12px;
+}
+.assist-bar button.ghost {
+  background: rgba(255,255,255,0.1);
+}
+
 
 .ai-cmd {
   display: flex;

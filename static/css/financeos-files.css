@@ -1,0 +1,36 @@
+:root { font-family: "Segoe UI","PingFang SC",sans-serif; }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #f3f3f3; color: #1a1a1a; }
+.fm-shell { height: 100%; display: grid; grid-template-columns: 160px 1fr; }
+.fm-side {
+  background: #ebebeb; border-right: 1px solid #ddd; padding: 10px 8px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.fm-side button {
+  border: 0; background: transparent; text-align: left; padding: 8px 10px;
+  border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.fm-side button:hover, .fm-side button.active { background: #fff; }
+.fm-main { display: grid; grid-template-rows: auto 1fr auto; min-width: 0; }
+.fm-toolbar {
+  display: flex; gap: 6px; align-items: center; padding: 8px; background: #fff;
+  border-bottom: 1px solid #e5e5e5;
+}
+.fm-toolbar input {
+  flex: 1; border: 1px solid #ddd; border-radius: 6px; padding: 6px 8px; font-size: 12px;
+}
+.fm-toolbar button {
+  border: 1px solid #ddd; background: #f8f8f8; border-radius: 6px; padding: 6px 8px;
+  cursor: pointer; font-size: 12px; white-space: nowrap;
+}
+.fm-list { overflow: auto; padding: 8px; display: grid; grid-template-columns: repeat(auto-fill, 96px); gap: 8px; align-content: start; }
+.fm-item {
+  border: 1px solid transparent; background: transparent; border-radius: 8px;
+  padding: 10px 6px; cursor: pointer; text-align: center; font-size: 12px;
+}
+.fm-item:hover, .fm-item.selected { background: #e8f1fb; border-color: #c5dcf5; }
+.fm-item .ico { font-size: 28px; display: block; margin-bottom: 4px; }
+.fm-preview {
+  margin: 0; max-height: 36%; overflow: auto; background: #111; color: #d1fae5;
+  padding: 10px; font-size: 12px; border-top: 1px solid #ddd;
+}

@@ -118,7 +118,7 @@ def _add_cache_headers(response):
 _analysis_cache = {}
 
 # 前端资源版本：每次发版递增，避免老账号浏览器缓存旧 UI
-UI_BUILD = '20260804win11'
+UI_BUILD = '20260806dash'
 
 # 站点信任信息（可用环境变量覆盖，便于正式部署）
 SITE_INFO = {
@@ -305,7 +305,7 @@ _FEATURE_PATH_RULES: list[tuple[str, str]] = [
     ('/api/workflow/approvals', 'approvals'),
     ('/workflow/tasks', 'tasks'),
     ('/api/workflow/tasks', 'tasks'),
-    ('/dashboard', 'dashboard'),
+    # /dashboard、/edit 为桌面核心应用，登录即可访问（不按角色隐藏）
     ('/analysis', 'analysis'),
     ('/report', 'report'),
     ('/agent', 'agent'),
@@ -616,8 +616,7 @@ def edit_page():
     if uid:
         # 强制从 SQLite 覆盖内存，保证协同写回后普通编辑看到最新数据
         restore_working_tables_for_user(uid, force=True)
-    if get_active_table() is None:
-        return redirect(url_for('index'))
+    # 无数据时仍打开编辑器（桌面快捷方式），不再踢回首页
     return render_template('edit.html', collab_token=None, ui_build=UI_BUILD)
 
 
@@ -668,11 +667,10 @@ def tasks_page():
 
 @app.route('/dashboard')
 def dashboard_page():
+    """审计仪表盘。无数据时仍打开页面（显示空态引导），避免在 OS 窗口内重定向回桌面。"""
     uid = _uid()
     if uid:
         restore_working_tables_for_user(uid, force=False)
-    if get_active_table() is None:
-        return redirect(url_for('index'))
     return render_template('dashboard.html')
 
 
@@ -681,8 +679,6 @@ def preview_page():
     uid = _uid()
     if uid:
         restore_working_tables_for_user(uid, force=False)
-    if get_active_table() is None:
-        return redirect(url_for('index'))
     return render_template('preview.html')
 
 
@@ -691,8 +687,6 @@ def analysis_page():
     uid = _uid()
     if uid:
         restore_working_tables_for_user(uid, force=False)
-    if get_active_table() is None:
-        return redirect(url_for('index'))
     return render_template('analysis.html')
 
 
@@ -790,6 +784,102 @@ def financeos_browser_page():
     return render_template('financeos_browser.html')
 
 
+@app.route('/os-ai')
+def financeos_ai_page():
+    """FinanceOS 桌面默认 AI 对话应用。"""
+    return render_template('financeos_ai.html')
+
+
+@app.route('/files')
+def financeos_files_page():
+    return render_template('financeos_files.html')
+
+
+@app.route('/terminal')
+def financeos_terminal_page():
+    return render_template('financeos_terminal.html')
+
+
+@app.route('/api/fos/files')
+def api_fos_files_list():
+    from modules import fos_filespace as fos
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    return jsonify(fos.list_dir(uid, request.args.get('path') or ''))
+
+
+@app.route('/api/fos/files/read')
+def api_fos_files_read():
+    from modules import fos_filespace as fos
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    return jsonify(fos.read_file(uid, request.args.get('path') or ''))
+
+
+@app.route('/api/fos/files/write', methods=['POST'])
+def api_fos_files_write():
+    from modules import fos_filespace as fos
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    data = request.get_json(silent=True) or {}
+    return jsonify(fos.write_file(uid, data.get('path') or '', data.get('content') or ''))
+
+
+@app.route('/api/fos/files/mkdir', methods=['POST'])
+def api_fos_files_mkdir():
+    from modules import fos_filespace as fos
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    data = request.get_json(silent=True) or {}
+    return jsonify(fos.mkdir(uid, data.get('path') or ''))
+
+
+@app.route('/api/fos/files/delete', methods=['POST'])
+def api_fos_files_delete():
+    from modules import fos_filespace as fos
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    data = request.get_json(silent=True) or {}
+    return jsonify(fos.delete_path(uid, data.get('path') or ''))
+
+
+@app.route('/api/fos/shortcuts', methods=['GET', 'POST'])
+def api_fos_shortcuts():
+    from modules import fos_filespace as fos
+    from modules.financeos import list_apps_for_user
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    if request.method == 'GET':
+        apps = list_apps_for_user(g.get('current_user'))
+        items = fos.ensure_default_shortcuts(uid, apps)
+        return jsonify({'success': True, 'items': items})
+    data = request.get_json(silent=True) or {}
+    return jsonify(fos.save_shortcuts(uid, data.get('items') or []))
+
+
+@app.route('/api/fos/terminal', methods=['POST'])
+def api_fos_terminal():
+    from modules.fos_terminal import run_command
+    uid = _uid()
+    if not uid:
+        return jsonify({'success': False, 'error': 'login required'}), 401
+    data = request.get_json(silent=True) or {}
+    return jsonify(run_command(uid, data.get('cmd') or '', data.get('cwd') or ''))
+
+
+@app.route('/api/fos/assist')
+def api_fos_assist():
+    from modules.fos_assist import suggest_for
+    app_id = (request.args.get('app_id') or '').strip()
+    return jsonify({'success': True, 'app_id': app_id, 'suggestions': suggest_for(app_id)})
+
+
 @app.route('/api/browser/home')
 def api_browser_home():
     from modules.browser_engine import HOME_HTML
@@ -806,7 +896,15 @@ def api_browser_gecko():
         from modules.browser_engine import HOME_HTML
         return jsonify({'success': True, 'engine': 'gecko', 'url': url, 'title': '主页', 'html': HOME_HTML})
     if url.startswith('/'):
-        return jsonify({'success': False, 'error': '站内地址请使用 Blink 或直接打开应用', 'engine': 'gecko'})
+        # 站内页（含搜索）由前端 iframe 直接加载；此处返回指引避免误当外链抓取
+        return jsonify({
+            'success': True,
+            'engine': 'gecko',
+            'url': url,
+            'title': '站内',
+            'internal': True,
+            'html': '',
+        })
     return jsonify(fetch_gecko(url))
 
 

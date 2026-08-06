@@ -1,5 +1,5 @@
-/* 智能财务系统 PWA Service Worker — 仅做可安装与离线壳，接口仍走网络 */
-const CACHE = 'finance-shell-v1';
+/* FinanceOS PWA Service Worker — 不缓存桌面 JS，避免旧版自动弹 AI */
+const CACHE = 'finance-shell-v3';
 const SHELL = [
   '/static/css/style.css',
   '/static/icons/icon-192.png',
@@ -25,8 +25,12 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  // API / 页面始终走网络，避免脏缓存
   if (url.pathname.startsWith('/api/') || url.pathname === '/' || !url.pathname.startsWith('/static/')) {
+    return;
+  }
+  // 桌面 / OS 脚本与样式始终走网络（带 ?v= 强刷）
+  if (/financeos-|agent_actions/.test(url.pathname)) {
+    event.respondWith(fetch(req));
     return;
   }
   event.respondWith(
